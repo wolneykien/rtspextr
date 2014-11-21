@@ -29,7 +29,7 @@
 
 #define DEFIP "127.0.0.1"
 #define DEFPORT 5440
-//#define DEFRTSPCHN 256
+#define DEFRTSPCHN 256
 
 #define DEFREPORTCOUNT 1024
 
@@ -155,8 +155,8 @@ enum ptype find_pkt( struct input *in, struct bufdesc *buf,
                      struct stats *stats );
 int send_bin( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats );
-int skip_rtsp( struct input *in, struct bufdesc *buf,
-               struct stats *stats );
+int send_rtsp( struct input *in, struct output *out,
+               struct bufdesc *buf, struct stats *stats );
 
 int rtspextr( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats )
@@ -182,7 +182,7 @@ int rtspextr( struct input *in, struct output *out,
     case RTSP:
       stats->total++;
       stats->rtsp++;
-      ret = skip_rtsp( in, buf, stats );
+      ret = send_rtsp( in, out, buf, stats );
       if ( ret != 0 ) {
         fprintf( stderr, "Unable to read/skip RTSP packet\n" );
       }
@@ -310,9 +310,9 @@ int bin_header( struct bufdesc *buf, struct binpkt *hdr )
   return 0;
 }
 
-size_t write_bin( struct output *out, int portoffs,
-                  struct bufdesc *buf, size_t towrite, int send,
-                  struct stats *stats )
+size_t writeout( struct output *out, int portoffs,
+                 struct bufdesc *buf, size_t towrite, int send,
+                 struct stats *stats )
 {
   size_t wt = 0;
 
@@ -344,6 +344,7 @@ int send_bin( struct input *in, struct output *out,
 
   size_t wtotal = 0;
 
+  int send_err = 0;
   while ( wtotal < pkt.len )
   {
     if ( buf->avail == 0 ) {
@@ -356,18 +357,20 @@ int send_bin( struct input *in, struct output *out,
     }
 
     size_t towrite = pkt.len - wtotal < buf->avail ?
-                       pkt.len - wtotal:
+                       pkt.len - wtotal :
                        buf->avail;
 
-    size_t wt = write_bin( out, pkt.chn, buf, towrite,
-                           wtotal + towrite == pkt.len, stats );
-    if ( wt != towrite ) {
-      stats->send_err++;
-    }
+    size_t wt = writeout( out, pkt.chn, buf, towrite,
+                          wtotal + towrite == pkt.len, stats );
+    if ( wt != towrite )
+      send_err = 1;
 
     wtotal += towrite;
     skip( buf, towrite );
   }
+
+  if ( send_err )
+    stats->send_err++;
 
   return 0;
 }
@@ -461,8 +464,8 @@ int parse_rstp_header( char* str, char **name, char **val )
   return 0;
 }
 
-int skip_rtsp( struct input *in, struct bufdesc *buf,
-               struct stats *stats )
+int send_rtsp( struct input *in, struct output *out,
+               struct bufdesc *buf, struct stats *stats )
 {
   int ret = 0;
 
@@ -473,6 +476,8 @@ int skip_rtsp( struct input *in, struct bufdesc *buf,
       return ret;
     }
   }
+
+  uint8_t *rtsp_hdr = buf->offs;
   
   char *status = zero_endl( buf );
   if ( status != NULL ) {
@@ -509,21 +514,41 @@ int skip_rtsp( struct input *in, struct bufdesc *buf,
     }
   }
 
-  size_t skipped = 0;
-  while ( clen > skipped ) {
+  size_t wtotal = 0;
+  size_t towrite = (size_t) (buf->offs - rtsp_hdr);
+  int send_err = 0;
+  size_t wt = writeout( out, DEFRTSPCHN, buf, towrite,
+                        clen == 0, stats );
+  if ( wt != towrite )
+    send_err = 1;
+  
+  wtotal += towrite;
+  size_t rtsp_len = clen + wtotal;
+
+  while ( wtotal < rtsp_len ) {
     if ( buf->avail == 0 ) {
       ret = read_next( in, buf );
       if ( ret != 0 ) {
-        fprintf( stderr, "Unable to skip the next portion of the " \
+        fprintf( stderr, "Unable to read the next portion of the " \
                          "RTSP-packet\n" );
         return ret;
       }
     }
-    size_t toskip = clen - skipped < buf->avail ?
-                      clen - skipped:
-                      buf->avail;
-    skipped += skip( buf, toskip );
+
+    towrite = rtsp_len - wtotal < buf->avail ?
+                rtsp_len - wtotal :
+                buf->avail;
+    wt = writeout( out, DEFRTSPCHN, buf, towrite,
+                   wtotal + towrite == rtsp_len, stats );
+    if ( wt != towrite )
+      send_err = 1;
+
+    wtotal += towrite;
+    skip( buf, towrite );
   }
+
+  if ( send_err )
+    stats->send_err++;
   
   return 0;
 }
