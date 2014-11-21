@@ -29,7 +29,7 @@
 
 #define DEFIP "127.0.0.1"
 #define DEFPORT 5440
-#define DEFCHN 0
+//#define DEFRTSPCHN 256
 
 #define DEFREPORTCOUNT 1024
 
@@ -43,7 +43,6 @@ struct stats {
   size_t rtsp_ok;
   size_t bin;
   size_t sent;
-  size_t unmapped;
   size_t send_err;
   size_t other;
   size_t total;
@@ -65,65 +64,48 @@ struct bufdesc {
   size_t avail;
 };
 
-struct chnmap {
-  int chn;
+struct output {
   int sock;
   struct sockaddr *destaddr;
   socklen_t addrlen;
-  struct chnmap *next;
 };
 
-int rtspextr( struct input *in, struct chnmap *chnmap,
+int rtspextr( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats );
 int close_input( struct input *in );
+int close_output( struct output *out );
 void report_stats( struct stats *stats );
 
-void main( int argc, char **argv)
+
+void main( int argc, char **argv )
 {
   uint8_t buf[ BUFSIZE ];
   struct bufdesc bufdesc = { buf, sizeof( buf ), buf, 0 };
   struct stats stats;
+  int ret = 0;
 
   struct input in = { stdin, -1 };
 
-  int outsock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+  struct sockaddr_in destaddr;
+  struct output out = { -1, (struct sockaddr *) &destaddr,
+                        sizeof( destaddr ) };
 
-  struct sockaddr_in destaddr1_in;
-  destaddr1_in.sin_family = AF_INET;
-  destaddr1_in.sin_port = htons( DEFPORT + 1);
-  if ( inet_aton( DEFIP, &destaddr1_in.sin_addr ) == 0 ) {
-    fprintf( stderr, "Incorrect addr: %s\n", DEFIP );
-    exit( 1 );
+  out.sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+  destaddr.sin_family = AF_INET;
+  destaddr.sin_port = DEFPORT;
+  if ( inet_aton( DEFIP, &destaddr.sin_addr ) == 0 ) {
+    fprintf( stderr, "Incorrect IP address: %s\n", DEFIP );
+    ret = 1;
   }
-  struct sockaddr_in destaddr0_in;
-  destaddr0_in.sin_family = AF_INET;
-  destaddr0_in.sin_port = htons( DEFPORT );
-  if ( inet_aton( DEFIP, &destaddr0_in.sin_addr ) == 0 ) {
-    fprintf( stderr, "Incorrect addr: %s\n", DEFIP );
-    exit( 1 );
-  }
-  struct chnmap chnmap1 = {
-    DEFCHN + 1,
-    outsock,
-    (struct sockaddr *) &destaddr1_in,
-    sizeof( destaddr1_in ),
-    NULL
-  };
-  struct chnmap chnmap0 = {
-    DEFCHN,
-    outsock,
-    (struct sockaddr *) &destaddr0_in,
-    sizeof( destaddr0_in ),
-    &chnmap1
-  };
 
   memset( &stats, 0, sizeof( stats ) );
 
-  int ret = rtspextr( &in, &chnmap0, &bufdesc, &stats );
+  if ( ret == 0 ) {
+    ret = rtspextr( &in, &out, &bufdesc, &stats );
+    report_stats( &stats );
+  }
 
-  report_stats( &stats );
-
-  close( outsock );
+  close_output( &out );
   close_input( &in );
 
   exit( ret );
@@ -153,15 +135,30 @@ int close_input( struct input *in ) {
   return 0;
 }
 
+int close_output( struct output *out ) {
+  int ret = 0;
+
+  if ( out->sock >= 0 ) {
+    ret = close( out->sock );
+    if ( ret != 0 ) {
+      fprintf( stderr, "Error closing the output socket\n" );
+    } else {
+      out->sock = -1;
+    }
+  }
+
+  return ret;
+}
+
 
 enum ptype find_pkt( struct input *in, struct bufdesc *buf,
                      struct stats *stats );
-int send_bin( struct input *in, struct chnmap *chnmap,
+int send_bin( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats );
 int skip_rtsp( struct input *in, struct bufdesc *buf,
                struct stats *stats );
 
-int rtspextr( struct input *in, struct chnmap *chnmap,
+int rtspextr( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats )
 {
   int ret = 0;
@@ -177,7 +174,7 @@ int rtspextr( struct input *in, struct chnmap *chnmap,
     case BIN:
       stats->total++;
       stats->bin++;
-      ret = send_bin( in, chnmap, buf, stats );
+      ret = send_bin( in, out, buf, stats );
       if ( ret != 0 ) {
         fprintf( stderr, "Unable to read/skip binary packet\n" );
       }
@@ -218,8 +215,6 @@ void report_stats( struct stats *stats )
           stats->sent );
  fprintf( stdout, "ERR Send errors: %lu\n",
           stats->send_err );
- fprintf( stdout, "UNMAP Unmapped channels: %lu\n",
-          stats->unmapped );
  fprintf( stdout, "UNDET Uknown traffic, bytes: %lu\n",
           stats->other );
  fprintf( stdout, "\n" );
@@ -315,8 +310,9 @@ int bin_header( struct bufdesc *buf, struct binpkt *hdr )
   return 0;
 }
 
-size_t write_bin( struct chnmap *map, struct bufdesc *buf,
-                  size_t towrite, int send, struct stats *stats )
+size_t write_bin( struct output *out, int portoffs,
+                  struct bufdesc *buf, size_t towrite, int send,
+                  struct stats *stats )
 {
   size_t wt = 0;
 
@@ -328,18 +324,7 @@ size_t write_bin( struct chnmap *map, struct bufdesc *buf,
   return wt;
 }
 
-struct chnmap *getchnmap( struct binpkt *binpkt,
-                          struct chnmap *chnmap )
-{
-  while ( chnmap != NULL ) {
-    if ( chnmap->chn == binpkt->chn ) {
-      return chnmap;
-    }
-    chnmap = chnmap->next;
-  }
-}
-
-int send_bin( struct input *in, struct chnmap *chnmap,
+int send_bin( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats )
 {
   int ret = 0;
@@ -356,13 +341,6 @@ int send_bin( struct input *in, struct chnmap *chnmap,
   struct binpkt pkt;
   ret = bin_header( buf, &pkt );
   if ( ret != 0 ) return ret;
-
-  struct chnmap *map = getchnmap( &pkt, chnmap );
-
-  if ( map == NULL ) {
-    // TODO: skip ?
-    stats->unmapped++;
-  }
 
   size_t wtotal = 0;
 
@@ -381,13 +359,10 @@ int send_bin( struct input *in, struct chnmap *chnmap,
                        pkt.len - wtotal:
                        buf->avail;
 
-    if ( map != NULL ) {
-      size_t wt;
-      wt = write_bin( map, buf, towrite,
-                      wtotal + towrite == pkt.len, stats );
-      if ( wt != towrite ) {
-        stats->send_err++;
-      }
+    size_t wt = write_bin( out, pkt.chn, buf, towrite,
+                           wtotal + towrite == pkt.len, stats );
+    if ( wt != towrite ) {
+      stats->send_err++;
     }
 
     wtotal += towrite;
