@@ -66,8 +66,7 @@ struct bufdesc {
 
 struct output {
   int sock;
-  struct sockaddr *destaddr;
-  socklen_t addrlen;
+  struct sockaddr_in *destaddr;
 };
 
 int rtspextr( struct input *in, struct output *out,
@@ -87,8 +86,7 @@ void main( int argc, char **argv )
   struct input in = { stdin, -1 };
 
   struct sockaddr_in destaddr;
-  struct output out = { -1, (struct sockaddr *) &destaddr,
-                        sizeof( destaddr ) };
+  struct output out = { -1, &destaddr };
 
   out.sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
   destaddr.sin_family = AF_INET;
@@ -311,15 +309,25 @@ int bin_header( struct bufdesc *buf, struct binpkt *hdr )
 }
 
 size_t writeout( struct output *out, int portoffs,
-                 struct bufdesc *buf, size_t towrite, int send,
+                 const void *buf, size_t towrite, int send,
                  struct stats *stats )
 {
-  size_t wt = 0;
+  in_port_t origport = out->destaddr->sin_port;
+  out->destaddr->sin_port = htons( origport + portoffs );
 
-  wt = towrite;
-  if ( send ) {
+  int flags = 0;
+  if ( !send )
+    flags |= MSG_MORE;
+
+  size_t wt = sendto( out->sock, buf, towrite, flags,
+                      (struct sockaddr *) out->destaddr,
+                      sizeof( *out->destaddr ) );
+  
+  if ( send && wt == towrite ) {
     stats->sent++;
   }
+
+  out->destaddr->sin_port = origport;
 
   return wt;
 }
@@ -360,7 +368,7 @@ int send_bin( struct input *in, struct output *out,
                        pkt.len - wtotal :
                        buf->avail;
 
-    size_t wt = writeout( out, pkt.chn, buf, towrite,
+    size_t wt = writeout( out, pkt.chn, buf->offs, towrite,
                           wtotal + towrite == pkt.len, stats );
     if ( wt != towrite )
       send_err = 1;
@@ -517,7 +525,7 @@ int send_rtsp( struct input *in, struct output *out,
   size_t wtotal = 0;
   size_t towrite = (size_t) (buf->offs - rtsp_hdr);
   int send_err = 0;
-  size_t wt = writeout( out, DEFRTSPCHN, buf, towrite,
+  size_t wt = writeout( out, DEFRTSPCHN, rtsp_hdr, towrite,
                         clen == 0, stats );
   if ( wt != towrite )
     send_err = 1;
@@ -538,7 +546,7 @@ int send_rtsp( struct input *in, struct output *out,
     towrite = rtsp_len - wtotal < buf->avail ?
                 rtsp_len - wtotal :
                 buf->avail;
-    wt = writeout( out, DEFRTSPCHN, buf, towrite,
+    wt = writeout( out, DEFRTSPCHN, buf->offs, towrite,
                    wtotal + towrite == rtsp_len, stats );
     if ( wt != towrite )
       send_err = 1;
