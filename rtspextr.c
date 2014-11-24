@@ -31,7 +31,7 @@
 #define DEFPORT 5440
 #define DEFRTSPCHN 256
 
-#define DEFREPORTCOUNT 1024
+#define DEFREPORTCOUNT 10240
 
 struct input {
   FILE *stream;
@@ -42,6 +42,7 @@ struct stats {
   size_t rtsp;
   size_t rtsp_ok;
   size_t bin;
+  size_t bin_b;
   size_t sent;
   size_t send_err;
   size_t other;
@@ -209,6 +210,8 @@ void report_stats( struct stats *stats )
           stats->rtsp_ok );
  fprintf( stdout, "BIN Binary packets detected: %lu\n",
           stats->bin );
+ fprintf( stdout, "BINB Binary traffic, bytes: %lu\n",
+          stats->bin_b );
  fprintf( stdout, "SENT Packets sent: %lu\n",
           stats->sent );
  fprintf( stdout, "ERR Send errors: %lu\n",
@@ -372,6 +375,8 @@ int send_bin( struct input *in, struct output *out,
                           wtotal + towrite == pkt.len, stats );
     if ( wt != towrite )
       send_err = 1;
+
+    stats->bin_b += wt;
 
     wtotal += towrite;
     skip( buf, towrite );
