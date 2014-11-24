@@ -41,8 +41,10 @@ struct input {
 struct stats {
   size_t rtsp;
   size_t rtsp_ok;
-  size_t bin;
-  size_t bin_b;
+  size_t tbin;
+  size_t tbin_b;
+  size_t chnbin[ 256 ];
+  size_t chnbin_b[ 256 ];
   size_t sent;
   size_t send_err;
   size_t other;
@@ -172,7 +174,7 @@ int rtspextr( struct input *in, struct output *out,
     switch ( ptype ) {
     case BIN:
       stats->total++;
-      stats->bin++;
+      stats->tbin++;
       ret = send_bin( in, out, buf, stats );
       if ( ret != 0 ) {
         fprintf( stderr, "Unable to read/skip binary packet\n" );
@@ -202,25 +204,37 @@ int rtspextr( struct input *in, struct output *out,
 
 void report_stats( struct stats *stats )
 {
- fprintf( stdout, "TOTAL Total packets detected: %lu\n",
-          stats->total );
- fprintf( stdout, "RTSP RTSP packets detected: %lu\n",
-          stats->rtsp );
- fprintf( stdout, "RTSPOK Having '200 OK' status: %lu\n",
-          stats->rtsp_ok );
- fprintf( stdout, "BIN Binary packets detected: %lu\n",
-          stats->bin );
- fprintf( stdout, "BINB Binary traffic, bytes: %lu\n",
-          stats->bin_b );
- fprintf( stdout, "SENT Packets sent: %lu\n",
-          stats->sent );
- fprintf( stdout, "ERR Send errors: %lu\n",
-          stats->send_err );
- fprintf( stdout, "UNDET Uknown traffic, bytes: %lu\n",
-          stats->other );
- fprintf( stdout, "\n" );
+  int i;
 
- stats->reported = stats->total;
+  fprintf( stdout, "DEC Total packets detected: %lu\n",
+           stats->total );
+  fprintf( stdout, "RTSP RTSP packets detected: %lu\n",
+           stats->rtsp );
+  fprintf( stdout, "RTSPOK Having '200 OK' status: %lu\n",
+           stats->rtsp_ok );
+
+  for ( i = 0; i < 256; i++ ) {
+    if ( stats->chnbin[ i ] ) {
+      fprintf( stdout, "BIN.%i Channel #%i binary packets detected: %lu\n",
+               i, i, stats->chnbin[ i ] );
+      fprintf( stdout, "BINB.%i Channel #%i Binary traffic, bytes: %lu\n",
+               i, i, stats->chnbin_b[ i ] );
+    }
+  }
+ 
+  fprintf( stdout, "TBIN Total binary packets detected: %lu\n",
+           stats->tbin );
+  fprintf( stdout, "TBINB Total binary traffic, bytes: %lu\n",
+           stats->tbin_b );
+  fprintf( stdout, "SENT Packets sent: %lu\n",
+           stats->sent );
+  fprintf( stdout, "ERR Send errors: %lu\n",
+           stats->send_err );
+  fprintf( stdout, "UNDET Uknown traffic, bytes: %lu\n",
+          stats->other );
+  fprintf( stdout, "\n" );
+  
+  stats->reported = stats->total;
 }
 
 int read_next( struct input *in, struct bufdesc *buf )
@@ -353,6 +367,8 @@ int send_bin( struct input *in, struct output *out,
   ret = bin_header( buf, &pkt );
   if ( ret != 0 ) return ret;
 
+  stats->chnbin[ pkt.chn ]++;
+
   size_t wtotal = 0;
 
   int send_err = 0;
@@ -376,7 +392,8 @@ int send_bin( struct input *in, struct output *out,
     if ( wt != towrite )
       send_err = 1;
 
-    stats->bin_b += wt;
+    stats->chnbin_b[ pkt.chn ] += wt;
+    stats->tbin_b += wt;
 
     wtotal += towrite;
     skip( buf, towrite );
