@@ -92,6 +92,11 @@ void main( int argc, char **argv )
   struct output out = { -1, &destaddr };
 
   out.sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+  if ( out.sock < 0 ) {
+    fprintf( stderr, "Unable to open output socket\n" );
+    ret = 1;
+  }
+
   destaddr.sin_family = AF_INET;
   destaddr.sin_port = DEFPORT;
   if ( inet_aton( DEFIP, &destaddr.sin_addr ) == 0 ) {
