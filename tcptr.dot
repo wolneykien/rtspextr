@@ -1,0 +1,54 @@
+digraph G {
+  dpi = 75;
+  rankdir = LR;
+
+  MX [ shape = box ];
+
+  MX -> tcpratr;
+
+  tcpratr -> ip0:p0;
+  tcpratr -> ip0:p1;
+  tcpratr -> ip0:pN;
+
+  ip0 [ shape =record rankdir = TB label = "<p0> IP0/port0|<p1> IP0/port1|<pN> IP0/portN" ];
+
+  ip0:p0 -> "rtspextr/p0";
+  ip0:p1 -> "rtspextr/p1";
+  ip0:pN -> "rtspextr/pN";
+
+  "rtspextr/p0" -> ip0p0:c0;
+  "rtspextr/p0" -> ip0p0:c1;
+  "rtspextr/p0" -> ip0p0:cM;
+  "rtspextr/p1" -> ip0p1:c0;
+  "rtspextr/p1" -> ip0p1:c1;
+  "rtspextr/p1" -> ip0p1:cM;
+  "rtspextr/pN" -> ip0pN:c0;
+  "rtspextr/pN" -> ip0pN:c1;
+  "rtspextr/pN" -> ip0pN:cM;
+
+  ip0p0 [ shape =record rankdir = TB label = "<c0> IP0/port0/chn0|<c1> IP0/port0/chn1|<cM> IP0/port0/chnM" ];
+  ip0p1 [ shape =record rankdir = TB label = "<c0> IP0/port1/chn0|<c1> IP0/port1/chn1|<cM> IP0/port1/chnM" ];
+  ip0pN [ shape =record rankdir = TB label = "<c0> IP0/portN/chn0|<c1> IP0/portN/chn1|<cM> IP0/portN/chnM" ];
+
+  ip0p0:c0 -> "rtptsrt/p0/c0";
+  ip0p0:c1 -> "rtptsrt/p0/c1";
+  ip0p0:cM -> "rtptsrt/p0/cM";
+  ip0p1:c0 -> "rtptsrt/p1/c0";
+  ip0p1:c1 -> "rtptsrt/p1/c1";
+  ip0p1:cM -> "rtptsrt/p1/cM";
+  ip0pN:c0 -> "rtptsrt/pN/c0";
+  ip0pN:c1 -> "rtptsrt/pN/c1";
+  ip0pN:cM -> "rtptsrt/pN/cM";
+
+  "rtptsrt/p0/c0" -> LAN;
+  "rtptsrt/p0/c1" -> LAN;
+  "rtptsrt/p0/cM" -> LAN;
+  "rtptsrt/p1/c0" -> LAN;
+  "rtptsrt/p1/c1" -> LAN;
+  "rtptsrt/p1/cM" -> LAN;
+  "rtptsrt/pN/c0" -> LAN;
+  "rtptsrt/pN/c1" -> LAN;
+  "rtptsrt/pN/cM" -> LAN;
+  
+  LAN [ shape = egg ];
+}
