@@ -31,14 +31,23 @@
 
 #define DEFIP "127.0.0.1"
 #define DEFPORT 5440
-#define DEFPATH "/tmp/rtpsock."
+#define DEFSOCKPATH "/tmp/rtpsock.%s" /* */
+#define DEFDUMPPATH "rtp.%s.pcap" /* */
 #define DEFRTSPCHN 256
 
 #define DEFREPORTCOUNT 1024
 
 
 #define SENDWHOLE
-#define UNIX
+
+#undef UDP // #define UDP
+#undef UNIX // #define UNIX
+#define PCAP
+
+#ifdef PCAP
+#include <pcap/pcap.h>
+#include <pcap/bpf.h>
+#endif
 
 struct input {
   FILE *stream;
@@ -53,7 +62,8 @@ struct stats {
   size_t chnbin[ 256 ];
   size_t chnbin_b[ 256 ];
   size_t sent;
-  size_t send_err;
+  size_t write_err;
+  size_t dumped;
   size_t other;
   size_t total;
   size_t reported;
@@ -79,6 +89,8 @@ struct output {
   struct sockaddr *srcaddr;
   struct sockaddr *destaddr;
   socklen_t addrlen;
+  pcap_t *pcap;
+  pcap_dumper_t *dumpers[ 256 + 1 ];
 };
 
 int rtspextr( struct input *in, struct output *out,
@@ -128,12 +140,20 @@ void main( int argc, char **argv )
   }
   srcaddr_un.sun_family = AF_UNIX;
   snprintf( srcaddr_un.sun_path, sizeof( srcaddr_un.sun_path ),
-           "%s%s", DEFPATH, "out" );
+           "%s%s", DEFSOCKPATH, "out" );
   unlink( srcaddr_un.sun_path );
   out.srcaddr = (struct sockaddr *) &srcaddr_un;
   ret = bind( out.sock, out.srcaddr, out.addrlen );
   if ( ret != 0 )
     perror( "Unable to bind the socket" );
+#endif
+
+#ifdef PCAP
+  out.pcap = pcap_open_dead(DLT_NULL, 1024);
+  if ( out.pcap == NULL ) {
+    fprintf( stderr, "Unable to get the libpcap handle\n" );
+    ret = 1;
+  }
 #endif
 
   memset( &stats, 0, sizeof( stats ) );
@@ -173,25 +193,36 @@ int close_input( struct input *in ) {
   return 0;
 }
 
-void writeeofall( struct output *out, int fromport, int toport );
-
 int close_output( struct output *out ) {
+  int p;
   int ret = 0;
 
   if ( out->sock >= 0 ) {
-    writeeofall( out, 0, DEFRTSPCHN );
+    for( p = DEFPORT; p <= DEFRTSPCHN; p++ ) {
+      sendeof( out, p );
+    }
     ret = close( out->sock );
     if ( ret != 0 ) {
       fprintf( stderr, "Error closing the output socket\n" );
     } else {
       out->sock = -1;
     }
+
+    if ( ret == 0 ) {
+      if ( out->destaddr->sa_family == AF_UNIX ) {
+        unlink( ((struct sockaddr_un *)out->srcaddr)->sun_path );
+      }
+    }
   }
 
-  if ( ret == 0 ) {
-    if ( out->destaddr->sa_family == AF_UNIX ) {
-      unlink( ((struct sockaddr_un *)out->srcaddr)->sun_path );
+  if ( out->pcap ) {
+    for( p = 0; p < sizeof( out->dumpers ); p++ ) {
+      if ( out->dumpers[ p ] )
+        pcap_dump_close( out->dumpers[ p ] );
+      out->dumpers[ p ] = NULL;
     }
+  
+    pcap_close( out->pcap );
   }
 
   return ret;
@@ -223,7 +254,7 @@ int rtspextr( struct input *in, struct output *out,
       stats->tbin++;
       ret = send_bin( in, out, buf, stats );
       if ( ret != 0 ) {
-        fprintf( stderr, "Unable to read/skip binary packet\n" );
+        fprintf( stderr, "Unable to read/send binary packet\n" );
       }
       break;
     case RTSP:
@@ -231,7 +262,7 @@ int rtspextr( struct input *in, struct output *out,
       stats->rtsp++;
       ret = send_rtsp( in, out, buf, stats );
       if ( ret != 0 ) {
-        fprintf( stderr, "Unable to read/skip RTSP packet\n" );
+        fprintf( stderr, "Unable to read/send RTSP packet\n" );
       }
       break;
     case EOS:
@@ -274,8 +305,8 @@ void report_stats( struct stats *stats )
            stats->tbin_b );
   fprintf( stdout, "SENT Packets sent: %lu\n",
            stats->sent );
-  fprintf( stdout, "ERR Send errors: %lu\n",
-           stats->send_err );
+  fprintf( stdout, "ERR Send/dump errors: %lu\n",
+           stats->write_err );
   fprintf( stdout, "UNDET Uknown traffic, bytes: %lu\n",
           stats->other );
   fprintf( stdout, "\n" );
@@ -392,52 +423,66 @@ int read_bin_header( struct input *in, struct bufdesc *buf,
   return 0;
 }
 
-int setoutport( struct output *out, int portoffs )
+int setoutport( struct output *out, int chn )
 {
   struct sockaddr_in *destaddr_in;
   struct sockaddr_un *destaddr_un;
+  char suff[ 5 ];
+  char dumppath[ sizeof( DEFDUMPPATH ) + 5 ];
 
-  switch ( out->destaddr->sa_family ) {
-  case AF_INET:
-    destaddr_in = (struct sockaddr_in *) out->destaddr;
-    destaddr_in->sin_port = htons( DEFPORT + portoffs );
-    break;
-  case AF_UNIX:
-    destaddr_un = (struct sockaddr_un *) out->destaddr;
-    snprintf( destaddr_un->sun_path,
-              sizeof( destaddr_un->sun_path ),
-              "%s%i", DEFPATH, portoffs );
-    break;
-  default:
-    fprintf( stderr, "Unsupported destination address family: %i\n",
-             out->destaddr->sa_family );
-    return 1;
+  if ( out->destaddr ) {
+    switch ( out->destaddr->sa_family ) {
+    case AF_INET:
+      destaddr_in = (struct sockaddr_in *) out->destaddr;
+      destaddr_in->sin_port = htons( DEFPORT + chn );
+      break;
+    case AF_UNIX:
+      destaddr_un = (struct sockaddr_un *) out->destaddr;
+      if ( chn != DEFRTSPCHN )
+        snprintf( suff, 5, "%i", chn );
+      else
+        snprintf( suff, 5, "%s", "rtsp" );
+      snprintf( destaddr_un->sun_path,
+                sizeof( destaddr_un->sun_path ),
+                DEFSOCKPATH, suff );
+      break;
+    default:
+      fprintf( stderr, "Unsupported destination address family: %i\n",
+               out->destaddr->sa_family );
+      return 1;
+    }
+  }
+  
+  if ( out->pcap ) {
+    if ( out->dumpers[ chn ] == NULL ) {
+      if ( chn != DEFRTSPCHN )
+        snprintf( suff, 5, "%i", chn );
+      else
+        snprintf( suff, 5, "%s", "rtsp" );
+      snprintf( dumppath, sizeof( dumppath ), DEFDUMPPATH, suff );
+      out->dumpers[ chn ] = pcap_dump_open( out->pcap, dumppath );
+      if ( out->dumpers[ chn ] == NULL ) {
+        fprintf( stderr, "Unable to create the dumpfile %s\n",
+                 dumppath );
+        return 1;
+      }
+    }
   }
 
   return 0;
 }
 
-size_t writeout( struct output *out, int portoffs,
-                 const void *buf, size_t towrite, int send,
-                 struct stats *stats )
+size_t sendout( struct output *out, int chn,
+                const void *buf, size_t towrite, int send )
 {
-  int ret = 0;
-
-  ret = setoutport( out, portoffs );
-  if ( ret != 0 )
-    return ret;
-
   int flags = 0;
+
   if ( !send )
     flags |= MSG_MORE;
-
+  
   size_t wt = sendto( out->sock, buf, towrite, flags,
                       (struct sockaddr *) out->destaddr,
                       out->addrlen );
-  
-  if ( send && wt == towrite ) {
-    stats->sent++;
-  }
 
   if ( ((int) wt) < 0 ) {
     if ( errno == ENOENT )
@@ -447,11 +492,58 @@ size_t writeout( struct output *out, int portoffs,
   return wt;
 }
 
-int writeeof( struct output *out, int portoffs )
+size_t dump( struct output *out, int chn,
+             const void *buf, size_t towrite, int complete )
+{
+  size_t ret = 0;
+  
+  if ( !complete ) {
+    ret = 0;
+  } else {
+    struct pcap_pkthdr phdr = { 0, towrite, towrite };
+    gettimeofday( &phdr.ts, NULL );
+    pcap_dump( (u_char *) out->dumpers[ chn ], &phdr, buf );
+    ret = towrite;
+  }
+  
+  return ret;
+}
+
+size_t writeout( struct output *out, int chn,
+                 const void *buf, size_t towrite, int complete,
+                 struct stats *stats )
+{
+  size_t ret = 0;
+
+  if ( setoutport( out, chn ) != 0 )
+    return -1;
+
+  if ( out->sock ) {
+    ret = sendout( out, chn, buf, towrite, complete );
+    if ( complete && ret == towrite ) {
+      stats->sent++;
+    }
+    if ( ((int) ret) < 0 )
+      return ret;
+  }
+
+  if ( out->pcap ) {
+    ret = dump( out, chn, buf, towrite, complete );
+    if ( complete && ret == towrite ) {
+      stats->dumped++;
+    }
+    if ( ((int) ret) < 0 )
+      return ret;
+  }
+
+  return ret;
+}
+
+int sendeof( struct output *out, int chn )
 {
   int ret = 0;
 
-  ret = setoutport( out, portoffs );
+  ret = setoutport( out, chn );
   if ( ret != 0 )
     return ret;
 
@@ -468,15 +560,6 @@ int writeeof( struct output *out, int portoffs )
   return ret;
 }
 
-void writeeofall( struct output *out, int fromport, int toport )
-{
-  int p;
-
-  for( p = fromport; p <= toport; p++ ) {
-    writeeof( out, p );
-  }
-}
-
 int send_bin( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats )
 {
@@ -490,7 +573,7 @@ int send_bin( struct input *in, struct output *out,
 
   size_t wtotal = 0;
 
-  int send_err = 0;
+  int write_err = 0;
   while ( wtotal < pkt.len )
   {
     if ( buf->avail == 0 ) {
@@ -518,20 +601,22 @@ int send_bin( struct input *in, struct output *out,
 
     size_t wt = writeout( out, pkt.chn, buf->offs, towrite,
                           wtotal + towrite == pkt.len, stats );
-    if ( ((int) wt) > 0 && wt != towrite )
-      send_err = 1;
+    if ( ((int) wt) < 0 )
+      return 1;
+    if ( wt != towrite )
+      write_err = 1;
 
     stats->chnbin_b[ pkt.chn ] += towrite;
-    stats->tbin_b += towrite;    
+    stats->tbin_b += towrite;
 
     wtotal += towrite;
     skip( buf, towrite );
   }
 
-  if ( send_err )
-    stats->send_err++;
+  if ( write_err )
+    stats->write_err++;
 
-  return 0;
+  return ret;
 }
 
 
@@ -673,11 +758,13 @@ int send_rtsp( struct input *in, struct output *out,
 
   size_t wtotal = 0;
   size_t towrite = (size_t) (buf->offs - rtsp_hdr);
-  int send_err = 0;
+  int write_err = 0;
   size_t wt = writeout( out, DEFRTSPCHN, rtsp_hdr, towrite,
                         clen == 0, stats );
-  if ( ((int) wt) > 0 && wt != towrite )
-    send_err = 1;
+  if ( ((int) wt) < 0 )
+    return 1;
+  if ( wt != towrite )
+    write_err = 1;
   
   wtotal += towrite;
   size_t rtsp_len = clen + wtotal;
@@ -697,15 +784,17 @@ int send_rtsp( struct input *in, struct output *out,
                 buf->avail;
     wt = writeout( out, DEFRTSPCHN, buf->offs, towrite,
                    wtotal + towrite == rtsp_len, stats );
-    if ( ((int) wt) > 0 && wt != towrite )
-      send_err = 1;
+    if ( ((int) wt) < 0 )
+      return 1;
+    if ( wt != towrite )
+      write_err = 1;
 
     wtotal += towrite;
     skip( buf, towrite );
   }
 
-  if ( send_err )
-    stats->send_err++;
+  if ( write_err )
+    stats->write_err++;
   
   return 0;
 }
