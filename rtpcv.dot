@@ -1,0 +1,30 @@
+digraph G {
+  dpi = 75;
+  rankdir = LR;
+
+  ip0p0 [ shape =record rankdir = TB label = "<c0> IP0/port0/chn0|<c1> IP0/port0/chn1|<cM> IP0/port0/chnM" ];
+  ip0p1 [ shape =record rankdir = TB label = "<c0> IP0/port1/chn0|<c1> IP0/port1/chn1|<cM> IP0/port1/chnM" ];
+  ip0pN [ shape =record rankdir = TB label = "<c0> IP0/portN/chn0|<c1> IP0/portN/chn1|<cM> IP0/portN/chnM" ];
+
+  ip0p0:c0 -> "rtpcv/p0/c0";
+  ip0p0:c1 -> "rtpcv/p0/c1";
+  ip0p0:cM -> "rtpcv/p0/cM";
+  ip0p1:c0 -> "rtpcv/p1/c0";
+  ip0p1:c1 -> "rtpcv/p1/c1";
+  ip0p1:cM -> "rtpcv/p1/cM";
+  ip0pN:c0 -> "rtpcv/pN/c0";
+  ip0pN:c1 -> "rtpcv/pN/c1";
+  ip0pN:cM -> "rtpcv/pN/cM";
+
+  "rtpcv/p0/c0" -> DISK:ip0p0c0;
+  "rtpcv/p0/c1" -> DISK:ip0p0c1;
+  "rtpcv/p0/cM" -> DISK:ip0p0cM;
+  "rtpcv/p1/c0" -> DISK:ip0p1c0;
+  "rtpcv/p1/c1" -> DISK:ip0p1c1;
+  "rtpcv/p1/cM" -> DISK:ip0p1cM;
+  "rtpcv/pN/c0" -> DISK:ip0pNc0;
+  "rtpcv/pN/c1" -> DISK:ip0pNc1;
+  "rtpcv/pN/cM" -> DISK:ip0pNcM;
+  
+  DISK [ shape = record rankdir = TB label ="<ip0p0c0> IP0/port0/chn0.ts|<ip0p0c1> IP0/port0/chn1.ts|<ip0p0cM> IP0/port0/chnM.ts|<ip0p1c0> IP0/port1/chn0.ts|<ip0p1c1> IP0/port1/chn1.ts|<ip0p1cM> IP0/port1/chnM.ts|<ip0pNc0> IP0/portN/chn0.ts|<ip0pNc1> IP0/portN/chn1.ts|<ip0pNcM> IP0/portN/chnM.ts" ];
+}
