@@ -36,7 +36,9 @@
 
 #define DEFREPORTCOUNT 1024
 
+
 #define SENDWHOLE
+#define UNIX
 
 struct input {
   FILE *stream;
@@ -96,7 +98,7 @@ void main( int argc, char **argv )
   struct input in = { stdin, -1 };
   struct output out = { -1, NULL, NULL, 0 };
 
-/*
+#ifdef UDP
   struct sockaddr_in destaddr_in;
   out.sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
   if ( out.sock < 0 ) {
@@ -111,8 +113,9 @@ void main( int argc, char **argv )
   }
   out.destaddr = (struct sockaddr *) &destaddr_in;
   out.addrlen = sizeof( destaddr_in );
-*/
+#endif
 
+#ifdef UNIX
   struct sockaddr_un srcaddr_un;
   struct sockaddr_un destaddr_un;
   out.sock = socket( AF_UNIX, SOCK_DGRAM, 0 );
@@ -131,6 +134,7 @@ void main( int argc, char **argv )
   ret = bind( out.sock, out.srcaddr, out.addrlen );
   if ( ret != 0 )
     perror( "Unable to bind the socket" );
+#endif
 
   memset( &stats, 0, sizeof( stats ) );
 
