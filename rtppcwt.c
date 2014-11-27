@@ -85,15 +85,16 @@ int dump_packets( int sock, char *chn, struct stats *stats )
       ret = errno;
     }
     
-    stats->total++;    
+    if ( rcvd > 0 ) {
+      stats->total++;    
+      if ( rcvd < stats->minlen || stats->minlen == 0 )
+        stats->minlen = rcvd;
+      if ( rcvd > stats->maxlen )
+        stats->maxlen = rcvd;
 
-    if ( rcvd > 0 && rcvd < stats->minlen || stats->minlen == 0 )
-      stats->minlen = rcvd;
-    if ( rcvd > stats->maxlen )
-      stats->maxlen = rcvd;
-
-    if ( stats->total - stats->reported >= DEFREPORTCOUNT )
-      report_stats( stats );
+      if ( stats->total - stats->reported >= DEFREPORTCOUNT )
+        report_stats( stats );
+    }
   } while ( ((int) rcvd) > 0 );
 
   if ( stats->total > stats->reported )

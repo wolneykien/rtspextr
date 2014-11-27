@@ -36,6 +36,8 @@
 
 #define DEFREPORTCOUNT 1024
 
+#define SENDWHOLE
+
 struct input {
   FILE *stream;
   int sock;
@@ -348,8 +350,29 @@ enum ptype find_pkt( struct input *in, struct bufdesc *buf,
     return ERR;
 }
 
-int bin_header( struct bufdesc *buf, struct binpkt *hdr )
+int read_ahead( struct input *in, struct bufdesc *buf )
 {
+  if ( buf->offs > buf->buf ) {
+    return read_next( in, buf );
+  } else {
+    return 0;
+  }
+}
+
+int read_bin_header( struct input *in, struct bufdesc *buf,
+                     struct binpkt *hdr )
+{
+  int ret = 0;
+
+  if ( buf->avail < 4 ) {
+    ret = read_ahead( in, buf );
+    if ( ret != 0 ) {
+      fprintf( stderr, "Unable to read the interleaved packet " \
+                       "header\n" );
+      return ret;
+    }
+  }
+
   if ( buf->avail < 4 ) {
     fprintf( stderr, "Need %lu more bytes to identify binary packet\n",
              4 - buf->avail );
@@ -455,17 +478,8 @@ int send_bin( struct input *in, struct output *out,
 {
   int ret = 0;
 
-  if ( buf->avail < 4 && buf->offs > buf->buf ) {
-    ret = read_next( in, buf );
-    if ( ret != 0 ) {
-      fprintf( stderr, "Unable to read the interleaved packet " \
-                       "header\n" );
-      return ret;
-    }
-  }
-
   struct binpkt pkt;
-  ret = bin_header( buf, &pkt );
+  ret = read_bin_header( in, buf, &pkt );
   if ( ret != 0 ) return ret;
 
   stats->chnbin[ pkt.chn ]++;
@@ -482,6 +496,16 @@ int send_bin( struct input *in, struct output *out,
                          "binary packet\n" );
         return ret;
       }
+    } else {
+#ifdef SENDWHOLE
+      if ( buf->avail < pkt.len ) {
+        ret = read_ahead( in, buf );
+        if ( ret != 0 ) {
+          fprintf( stderr, "Unable to read the whole binary packet\n" );
+          return ret;
+        }
+      }
+#endif
     }
 
     size_t towrite = pkt.len - wtotal < buf->avail ?
@@ -600,12 +624,10 @@ int send_rtsp( struct input *in, struct output *out,
 {
   int ret = 0;
 
-  if ( buf->offs > buf->buf ) {
-    ret = read_next( in, buf );
-    if ( ret != 0 ) {
-      fprintf( stderr, "Unable to read the full RTSP header\n" );
-      return ret;
-    }
+  ret = read_ahead( in, buf );
+  if ( ret != 0 ) {
+    fprintf( stderr, "Unable to read the full RTSP header\n" );
+    return ret;
   }
 
   uint8_t *rtsp_hdr = buf->offs;
