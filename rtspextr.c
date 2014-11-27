@@ -23,15 +23,18 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/un.h>
 #include <arpa/inet.h>
+#include <errno.h>
 
 #define BUFSIZE 65536
 
 #define DEFIP "127.0.0.1"
 #define DEFPORT 5440
+#define DEFPATH "/tmp/rtpsock."
 #define DEFRTSPCHN 256
 
-#define DEFREPORTCOUNT 10240
+#define DEFREPORTCOUNT 1024
 
 struct input {
   FILE *stream;
@@ -69,7 +72,9 @@ struct bufdesc {
 
 struct output {
   int sock;
-  struct sockaddr_in *destaddr;
+  struct sockaddr *srcaddr;
+  struct sockaddr *destaddr;
+  socklen_t addrlen;
 };
 
 int rtspextr( struct input *in, struct output *out,
@@ -87,22 +92,43 @@ void main( int argc, char **argv )
   int ret = 0;
 
   struct input in = { stdin, -1 };
+  struct output out = { -1, NULL, NULL, 0 };
 
-  struct sockaddr_in destaddr;
-  struct output out = { -1, &destaddr };
-
+/*
+  struct sockaddr_in destaddr_in;
   out.sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
   if ( out.sock < 0 ) {
     fprintf( stderr, "Unable to open output socket\n" );
     ret = 1;
   }
-
-  destaddr.sin_family = AF_INET;
-  destaddr.sin_port = DEFPORT;
-  if ( inet_aton( DEFIP, &destaddr.sin_addr ) == 0 ) {
+  destaddr_in.sin_family = AF_INET;
+  destaddr_in.sin_port = htons( DEFPORT );
+  if ( inet_aton( DEFIP, &destaddr_in.sin_addr ) == 0 ) {
     fprintf( stderr, "Incorrect IP address: %s\n", DEFIP );
     ret = 1;
   }
+  out.destaddr = (struct sockaddr *) &destaddr_in;
+  out.addrlen = sizeof( destaddr_in );
+*/
+
+  struct sockaddr_un srcaddr_un;
+  struct sockaddr_un destaddr_un;
+  out.sock = socket( AF_UNIX, SOCK_DGRAM, 0 );
+  destaddr_un.sun_family = AF_UNIX;
+  out.destaddr = (struct sockaddr *) &destaddr_un;
+  out.addrlen = sizeof( destaddr_un );
+  if ( out.sock < 0 ) {
+    fprintf( stderr, "Unable to open the socket\n" );
+    ret = 1;
+  }
+  srcaddr_un.sun_family = AF_UNIX;
+  snprintf( srcaddr_un.sun_path, sizeof( srcaddr_un.sun_path ),
+           "%s%s", DEFPATH, "out" );
+  unlink( srcaddr_un.sun_path );
+  out.srcaddr = (struct sockaddr *) &srcaddr_un;
+  ret = bind( out.sock, out.srcaddr, out.addrlen );
+  if ( ret != 0 )
+    perror( "Unable to bind the socket" );
 
   memset( &stats, 0, sizeof( stats ) );
 
@@ -141,15 +167,24 @@ int close_input( struct input *in ) {
   return 0;
 }
 
+void writeeofall( struct output *out, int fromport, int toport );
+
 int close_output( struct output *out ) {
   int ret = 0;
 
   if ( out->sock >= 0 ) {
+    writeeofall( out, 0, DEFRTSPCHN );
     ret = close( out->sock );
     if ( ret != 0 ) {
       fprintf( stderr, "Error closing the output socket\n" );
     } else {
       out->sock = -1;
+    }
+  }
+
+  if ( ret == 0 ) {
+    if ( out->destaddr->sa_family == AF_UNIX ) {
+      unlink( ((struct sockaddr_un *)out->srcaddr)->sun_path );
     }
   }
 
@@ -330,12 +365,40 @@ int bin_header( struct bufdesc *buf, struct binpkt *hdr )
   return 0;
 }
 
+int setoutport( struct output *out, int portoffs )
+{
+  struct sockaddr_in *destaddr_in;
+  struct sockaddr_un *destaddr_un;
+
+  switch ( out->destaddr->sa_family ) {
+  case AF_INET:
+    destaddr_in = (struct sockaddr_in *) out->destaddr;
+    destaddr_in->sin_port = htons( DEFPORT + portoffs );
+    break;
+  case AF_UNIX:
+    destaddr_un = (struct sockaddr_un *) out->destaddr;
+    snprintf( destaddr_un->sun_path,
+              sizeof( destaddr_un->sun_path ),
+              "%s%i", DEFPATH, portoffs );
+    break;
+  default:
+    fprintf( stderr, "Unsupported destination address family: %i\n",
+             out->destaddr->sa_family );
+    return 1;
+  }
+
+  return 0;
+}
+
 size_t writeout( struct output *out, int portoffs,
                  const void *buf, size_t towrite, int send,
                  struct stats *stats )
 {
-  in_port_t origport = out->destaddr->sin_port;
-  out->destaddr->sin_port = htons( origport + portoffs );
+  int ret = 0;
+
+  ret = setoutport( out, portoffs );
+  if ( ret != 0 )
+    return ret;
 
   int flags = 0;
   if ( !send )
@@ -343,15 +406,48 @@ size_t writeout( struct output *out, int portoffs,
 
   size_t wt = sendto( out->sock, buf, towrite, flags,
                       (struct sockaddr *) out->destaddr,
-                      sizeof( *out->destaddr ) );
+                      out->addrlen );
   
   if ( send && wt == towrite ) {
     stats->sent++;
   }
 
-  out->destaddr->sin_port = origport;
+  if ( ((int) wt) < 0 ) {
+    if ( errno == ENOENT )
+      wt = 0;
+  }
 
   return wt;
+}
+
+int writeeof( struct output *out, int portoffs )
+{
+  int ret = 0;
+
+  ret = setoutport( out, portoffs );
+  if ( ret != 0 )
+    return ret;
+
+  size_t wt = sendto( out->sock, NULL, 0, 0,
+                      (struct sockaddr *) out->destaddr,
+                      out->addrlen );
+
+  if ( ((int) wt) < 0 ) {
+    ret = errno;
+    if ( errno == ENOENT )
+      ret = 0;
+  }
+
+  return ret;
+}
+
+void writeeofall( struct output *out, int fromport, int toport )
+{
+  int p;
+
+  for( p = fromport; p <= toport; p++ ) {
+    writeeof( out, p );
+  }
 }
 
 int send_bin( struct input *in, struct output *out,
@@ -394,11 +490,11 @@ int send_bin( struct input *in, struct output *out,
 
     size_t wt = writeout( out, pkt.chn, buf->offs, towrite,
                           wtotal + towrite == pkt.len, stats );
-    if ( wt != towrite )
+    if ( ((int) wt) > 0 && wt != towrite )
       send_err = 1;
 
-    stats->chnbin_b[ pkt.chn ] += wt;
-    stats->tbin_b += wt;
+    stats->chnbin_b[ pkt.chn ] += towrite;
+    stats->tbin_b += towrite;    
 
     wtotal += towrite;
     skip( buf, towrite );
@@ -554,7 +650,7 @@ int send_rtsp( struct input *in, struct output *out,
   int send_err = 0;
   size_t wt = writeout( out, DEFRTSPCHN, rtsp_hdr, towrite,
                         clen == 0, stats );
-  if ( wt != towrite )
+  if ( ((int) wt) > 0 && wt != towrite )
     send_err = 1;
   
   wtotal += towrite;
@@ -575,7 +671,7 @@ int send_rtsp( struct input *in, struct output *out,
                 buf->avail;
     wt = writeout( out, DEFRTSPCHN, buf->offs, towrite,
                    wtotal + towrite == rtsp_len, stats );
-    if ( wt != towrite )
+    if ( ((int) wt) > 0 && wt != towrite )
       send_err = 1;
 
     wtotal += towrite;
