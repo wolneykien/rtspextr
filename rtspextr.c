@@ -47,6 +47,9 @@
 #ifdef PCAP
 #include <pcap/pcap.h>
 #include <pcap/bpf.h>
+
+#define PKTBUFSIZE 4096
+
 #endif
 
 struct input {
@@ -89,9 +92,23 @@ struct output {
   struct sockaddr *srcaddr;
   struct sockaddr *destaddr;
   socklen_t addrlen;
+#ifdef PCAP
   pcap_t *pcap;
   pcap_dumper_t *dumpers[ DEFRTSPCHN + 1 ];
+#endif
 };
+
+#ifdef PCAP
+struct pkthdr {
+  uint8_t macdst[ 6 ];
+  uint8_t macsrc[ 6 ];
+  uint8_t etype[ 2 ];
+} pkthdr = {
+  { 0x00, 0x21, 0xce, 0x00, 0x00, 0x01 },       // macdst
+  { 0x00, 0x21, 0xce, 0x00, 0x00, 0x02 },       // macsrc
+  { 0x08, 0x00 },                               // etype
+};
+#endif
 
 int rtspextr( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats );
@@ -149,7 +166,7 @@ void main( int argc, char **argv )
 #endif
 
 #ifdef PCAP
-  out.pcap = pcap_open_dead(DLT_NULL, 1024);
+  out.pcap = pcap_open_dead( DLT_EN10MB, PKTBUFSIZE );
   if ( out.pcap == NULL ) {
     fprintf( stderr, "Unable to get the libpcap handle\n" );
     ret = 1;
@@ -215,6 +232,7 @@ int close_output( struct output *out ) {
     }
   }
 
+#ifdef PCAP
   if ( out->pcap ) {
     for( p = 0; p <= DEFRTSPCHN; p++ ) {
       if ( out->dumpers[ p ] )
@@ -224,6 +242,7 @@ int close_output( struct output *out ) {
   
     pcap_close( out->pcap );
   }
+#endif
 
   return ret;
 }
@@ -474,6 +493,7 @@ int setoutport( struct output *out, int chn )
     }
   }
   
+#ifdef PCAP
   if ( out->pcap ) {
     if ( out->dumpers[ chn ] == NULL ) {
       if ( chn != DEFRTSPCHN )
@@ -489,6 +509,7 @@ int setoutport( struct output *out, int chn )
       }
     }
   }
+#endif
 
   return 0;
 }
@@ -513,22 +534,36 @@ size_t sendout( struct output *out, int chn,
   return wt;
 }
 
+#ifdef PCAP
 size_t dump( struct output *out, int chn,
              const void *buf, size_t towrite, int complete )
 {
   size_t ret = 0;
+  static uint8_t pktbuf[ PKTBUFSIZE ];
   
   if ( !complete ) {
-    ret = 0;
+    fprintf( stderr, "Can't dump incomplete packet\n" );
+    errno = ECANCELED;
+    ret = -1;
   } else {
-    struct pcap_pkthdr phdr = { 0, towrite, towrite };
-    gettimeofday( &phdr.ts, NULL );
-    pcap_dump( (u_char *) out->dumpers[ chn ], &phdr, buf );
-    ret = towrite;
+    if ( sizeof( pkthdr ) + towrite > PKTBUFSIZE ) {
+      fprintf( stderr, "Packet dump buffer too small\n" );
+      ret = -1;
+    } else {
+      memcpy( pktbuf, &pkthdr, sizeof( pkthdr ) );
+      memcpy( pktbuf + sizeof( pkthdr ), buf, towrite );
+      struct pcap_pkthdr phdr;
+      phdr.caplen = sizeof( pkthdr ) + towrite;
+      phdr.len = phdr.caplen;
+      gettimeofday( &phdr.ts, NULL );
+      pcap_dump( (u_char *) out->dumpers[ chn ], &phdr, pktbuf );
+      ret = towrite;
+    }
   }
   
   return ret;
 }
+#endif
 
 size_t writeout( struct output *out, int chn,
                  const void *buf, size_t towrite, int complete,
@@ -548,6 +583,7 @@ size_t writeout( struct output *out, int chn,
       return ret;
   }
 
+#ifdef PCAP
   if ( out->pcap ) {
     ret = dump( out, chn, buf, towrite, complete );
     if ( complete && ret == towrite ) {
@@ -556,6 +592,7 @@ size_t writeout( struct output *out, int chn,
     if ( ((int) ret) < 0 )
       return ret;
   }
+#endif
 
   return ret;
 }
