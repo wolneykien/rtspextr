@@ -48,7 +48,7 @@
 #include <pcap/pcap.h>
 #include <pcap/bpf.h>
 
-#define PKTBUFSIZE 4096
+#define PKTBUFSIZE 4096 /* */
 
 #endif
 
@@ -87,17 +87,6 @@ struct bufdesc {
   size_t avail;
 };
 
-struct output {
-  int sock;
-  struct sockaddr *srcaddr;
-  struct sockaddr *destaddr;
-  socklen_t addrlen;
-#ifdef PCAP
-  pcap_t *pcap;
-  pcap_dumper_t *dumpers[ DEFRTSPCHN + 1 ];
-#endif
-};
-
 #ifdef PCAP
 struct pkthdr {
   uint8_t macdst[ 6 ];
@@ -109,6 +98,18 @@ struct pkthdr {
   { 0x08, 0x00 },                               // etype
 };
 #endif
+
+struct output {
+  int sock;
+  struct sockaddr *srcaddr;
+  struct sockaddr *destaddr;
+  socklen_t addrlen;
+#ifdef PCAP
+  pcap_t *pcap;
+  pcap_dumper_t *dumpers[ DEFRTSPCHN + 1 ];
+  uint8_t pktbuf[ PKTBUFSIZE ];
+#endif
+};
 
 int rtspextr( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats );
@@ -171,6 +172,8 @@ void main( int argc, char **argv )
     fprintf( stderr, "Unable to get the libpcap handle\n" );
     ret = 1;
   }
+
+  memcpy( out.pktbuf, &pkthdr, sizeof( pkthdr ) );
 #endif
 
   memset( &stats, 0, sizeof( stats ) );
@@ -539,7 +542,6 @@ size_t dump( struct output *out, int chn,
              const void *buf, size_t towrite, int complete )
 {
   size_t ret = 0;
-  static uint8_t pktbuf[ PKTBUFSIZE ];
   
   if ( !complete ) {
     fprintf( stderr, "Can't dump incomplete packet\n" );
@@ -550,13 +552,12 @@ size_t dump( struct output *out, int chn,
       fprintf( stderr, "Packet dump buffer too small\n" );
       ret = -1;
     } else {
-      memcpy( pktbuf, &pkthdr, sizeof( pkthdr ) );
-      memcpy( pktbuf + sizeof( pkthdr ), buf, towrite );
+      memcpy( out->pktbuf + sizeof( pkthdr ), buf, towrite );
       struct pcap_pkthdr phdr;
       phdr.caplen = sizeof( pkthdr ) + towrite;
       phdr.len = phdr.caplen;
       gettimeofday( &phdr.ts, NULL );
-      pcap_dump( (u_char *) out->dumpers[ chn ], &phdr, pktbuf );
+      pcap_dump( (u_char *) out->dumpers[ chn ], &phdr, out->pktbuf );
       ret = towrite;
     }
   }
