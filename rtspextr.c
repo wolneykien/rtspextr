@@ -37,7 +37,6 @@
 
 #define DEFREPORTCOUNT 1024
 
-
 #define SENDWHOLE
 
 #undef UDP // #define UDP
@@ -88,14 +87,65 @@ struct bufdesc {
 };
 
 #ifdef PCAP
-struct pkthdr {
+struct ethhdr {
   uint8_t macdst[ 6 ];
   uint8_t macsrc[ 6 ];
   uint8_t etype[ 2 ];
+};
+
+struct iphdr {
+  uint8_t ver_ihl;
+  uint8_t dscp_ecn;
+  uint16_t iplen;
+  uint16_t ident;
+  uint8_t flags_foffs[ 2 ];
+  uint8_t ttl;
+  uint8_t proto;
+  uint16_t hdchksum;
+  uint8_t ipsrc[ 4 ];
+  uint8_t ipdst[ 4 ];
+};
+
+struct udphdr {
+  uint8_t srcport[ 2 ];
+  uint16_t dstport;
+  uint16_t udplen;
+  uint16_t udpchksum;
+};
+
+struct pkthdr {
+  struct ethhdr eth;
+  struct iphdr ip;
+  struct udphdr udp;
 } pkthdr = {
-  { 0x00, 0x21, 0xce, 0x00, 0x00, 0x01 },       // macdst
-  { 0x00, 0x21, 0xce, 0x00, 0x00, 0x02 },       // macsrc
-  { 0x08, 0x00 },                               // etype
+  /* Ethernet */
+  {
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },       // macdst
+    { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },       // macsrc
+    { 0x08, 0x00 },                               // etype
+  },
+
+  /* IPv4 */
+  {
+    0x45, // ver.2, header length 20 bytes        // ver_ihl
+    0x00,                                         // dscp_ecn
+    0x0000,                                       // iplen
+    0x0000,                                       // ident
+    { 0x40, 0x00 }, // don't fragment             // flags_foffs
+    0x40, // 64                                   // ttl
+    0x11, // UDP                                  // proto
+    0x0000,                                       // hdchksum
+    { 0x7f, 0x00, 0x00, 0x01 },                   // ipsrc
+    { 0x7f, 0x00, 0x00, 0x01 },                   // ipdst
+  },
+
+  /* UDP */
+  {
+    { 0x02, 0x2a },  // 554 (RTP)                 // srcport
+    0x0000,                                       // dstport
+    0x0000,                                       // udplen
+    0x0000,                                       // udpchksum
+  },
 };
 #endif
 
@@ -511,6 +561,8 @@ int setoutport( struct output *out, int chn )
         return 1;
       }
     }
+    struct pkthdr *bufhdr = (struct pkthdr *) out->pktbuf;
+    bufhdr->udp.dstport = htons( DEFPORT + chn );
   }
 #endif
 
@@ -552,6 +604,14 @@ size_t dump( struct output *out, int chn,
       fprintf( stderr, "Packet dump buffer too small\n" );
       ret = -1;
     } else {
+      struct pkthdr *bufhdr = (struct pkthdr *) out->pktbuf;
+      bufhdr->ip.iplen = htons( sizeof( struct pkthdr )
+                                - sizeof( struct ethhdr )
+                                + towrite );
+      bufhdr->udp.udplen = htons( sizeof( struct pkthdr )
+                                  - sizeof( struct ethhdr )
+                                  - sizeof( struct iphdr )
+                                  + towrite );
       memcpy( out->pktbuf + sizeof( pkthdr ), buf, towrite );
       struct pcap_pkthdr phdr;
       phdr.caplen = sizeof( pkthdr ) + towrite;
