@@ -59,8 +59,8 @@ struct stats {
   size_t rtsp_ok;
   size_t tbin;
   size_t tbin_b;
-  size_t chnbin[ 256 ];
-  size_t chnbin_b[ 256 ];
+  size_t chnbin[ DEFRTSPCHN ];
+  size_t chnbin_b[ DEFRTSPCHN ];
   size_t sent;
   size_t write_err;
   size_t dumped;
@@ -90,7 +90,7 @@ struct output {
   struct sockaddr *destaddr;
   socklen_t addrlen;
   pcap_t *pcap;
-  pcap_dumper_t *dumpers[ 256 + 1 ];
+  pcap_dumper_t *dumpers[ DEFRTSPCHN + 1 ];
 };
 
 int rtspextr( struct input *in, struct output *out,
@@ -198,7 +198,7 @@ int close_output( struct output *out ) {
   int ret = 0;
 
   if ( out->sock >= 0 ) {
-    for( p = DEFPORT; p <= DEFRTSPCHN; p++ ) {
+    for( p = DEFPORT; p <= (DEFPORT + DEFRTSPCHN); p++ ) {
       sendeof( out, p );
     }
     ret = close( out->sock );
@@ -216,7 +216,7 @@ int close_output( struct output *out ) {
   }
 
   if ( out->pcap ) {
-    for( p = 0; p < sizeof( out->dumpers ); p++ ) {
+    for( p = 0; p <= DEFRTSPCHN; p++ ) {
       if ( out->dumpers[ p ] )
         pcap_dump_close( out->dumpers[ p ] );
       out->dumpers[ p ] = NULL;
@@ -290,7 +290,7 @@ void report_stats( struct stats *stats )
   fprintf( stdout, "RTSPOK Having '200 OK' status: %lu\n",
            stats->rtsp_ok );
 
-  for ( i = 0; i < 256; i++ ) {
+  for ( i = 0; i < DEFRTSPCHN; i++ ) {
     if ( stats->chnbin[ i ] ) {
       fprintf( stdout, "BIN.%i Channel #%i binary packets detected: %lu\n",
                i, i, stats->chnbin[ i ] );
@@ -349,13 +349,32 @@ int read_next( struct input *in, struct bufdesc *buf )
 
 int skip( struct bufdesc *buf, size_t toskip )
 {
-  if ( toskip > buf->avail )
-    toskip = buf->avail;
+  if ( toskip > buf->avail ) {
+    fprintf( stderr, "Unable to skip %lu bytes: only %lu is " \
+                     "available\n",
+             toskip, buf->avail );
+    return 1;
+  }
 
   buf->offs += toskip;
   buf->avail -= toskip;
 
-  return toskip;
+  return 0;
+}
+
+int unskip( struct bufdesc *buf, size_t tounskip )
+{
+  if ( (buf->offs - tounskip) < buf->buf ) {
+    fprintf( stderr, "Unable to unskip %lu bytes: only %lu is " \
+                     "available\n",
+             tounskip, (size_t) (buf->offs - buf->buf) );
+    return 1;
+  }
+
+  buf->offs -= tounskip;
+  buf->avail += tounskip;
+
+  return 0;
 }
 
 enum ptype find_pkt( struct input *in, struct bufdesc *buf,
@@ -373,7 +392,8 @@ enum ptype find_pkt( struct input *in, struct bufdesc *buf,
       }
 
       stats->other++;
-      skip( buf, 1 );
+      if ( skip( buf, 1 ) != 0 )
+        return ERR;
     }
 
     ret = read_next( in, buf );
@@ -418,7 +438,8 @@ int read_bin_header( struct input *in, struct bufdesc *buf,
   hdr->chn = *(buf->offs + 1);
   hdr->len = ntohs( *((uint16_t *) (buf->offs + 2)) );
 
-  skip( buf, 4 );
+  if ( skip( buf, 4 ) != 0 )
+    return 1;
 
   return 0;
 }
@@ -518,7 +539,7 @@ size_t writeout( struct output *out, int chn,
   if ( setoutport( out, chn ) != 0 )
     return -1;
 
-  if ( out->sock ) {
+  if ( out->sock >=0 ) {
     ret = sendout( out, chn, buf, towrite, complete );
     if ( complete && ret == towrite ) {
       stats->sent++;
@@ -601,8 +622,10 @@ int send_bin( struct input *in, struct output *out,
 
     size_t wt = writeout( out, pkt.chn, buf->offs, towrite,
                           wtotal + towrite == pkt.len, stats );
-    if ( ((int) wt) < 0 )
+    if ( ((int) wt) < 0 ) {
+      perror( "Unable to send/write the binary packet" );
       return 1;
+    }
     if ( wt != towrite )
       write_err = 1;
 
@@ -610,7 +633,8 @@ int send_bin( struct input *in, struct output *out,
     stats->tbin_b += towrite;
 
     wtotal += towrite;
-    skip( buf, towrite );
+    if ( skip( buf, towrite ) != 0 )
+      return 1;
   }
 
   if ( write_err )
@@ -643,7 +667,8 @@ char *zero_endl( struct bufdesc *buf )
         }
 
       char *str = (char *) buf->offs;
-      skip( buf, (size_t) (endl - str) );
+      if ( skip( buf, (size_t) (endl - str) ) != 0 )
+        return NULL;
 
       return str;
     }
@@ -719,7 +744,7 @@ int send_rtsp( struct input *in, struct output *out,
     return ret;
   }
 
-  uint8_t *rtsp_hdr = buf->offs;
+  uint8_t *rtspoffs = buf->offs;
   
   char *status = zero_endl( buf );
   if ( status != NULL ) {
@@ -750,47 +775,70 @@ int send_rtsp( struct input *in, struct output *out,
         }
       }
     } else {
-      fprintf( stderr, "Next RTSP not found. " );
+      fprintf( stderr, "Next RTSP header not found. " );
       fprintf( stderr, "Buffer seems to be too small\n" );
       return 1;
     }
   }
 
   size_t wtotal = 0;
-  size_t towrite = (size_t) (buf->offs - rtsp_hdr);
   int write_err = 0;
-  size_t wt = writeout( out, DEFRTSPCHN, rtsp_hdr, towrite,
-                        clen == 0, stats );
-  if ( ((int) wt) < 0 )
+  size_t rtsphdrlen = (size_t) (buf->offs - rtspoffs);
+  size_t rtsplen = rtsphdrlen + clen;
+
+  if ( unskip( buf, rtsphdrlen ) != 0 )
     return 1;
+
+  size_t towrite;
+  size_t wt;
+
+#ifndef SENDWHOLE
+  towrite = rtsphdrlen;
+  wt = writeout( out, DEFRTSPCHN, buf->offs, towrite,
+                 clen == 0, stats );
+  if ( ((int) wt) < 0 ) {
+    perror( "Unable to send/write the RTSP packet header" );
+    return 1;
+  }
   if ( wt != towrite )
     write_err = 1;
-  
   wtotal += towrite;
-  size_t rtsp_len = clen + wtotal;
+  if ( skip( buf, towrite ) != 0 )
+    return 1;
+#endif
 
-  while ( wtotal < rtsp_len ) {
+  while ( wtotal < rtsplen ) {
+#ifdef SENDWHOLE
+    if ( buf->avail < rtsplen ) {
+      fprintf( stderr, "Unable to read the whole RTSP packet\n" );
+      return 1;
+    }
+#else
     if ( buf->avail == 0 ) {
       ret = read_next( in, buf );
       if ( ret != 0 ) {
         fprintf( stderr, "Unable to read the next portion of the " \
-                         "RTSP-packet\n" );
+                         "RTSP packet\n" );
         return ret;
       }
     }
+#endif
 
-    towrite = rtsp_len - wtotal < buf->avail ?
-                rtsp_len - wtotal :
+    towrite = rtsplen - wtotal < buf->avail ?
+                rtsplen - wtotal :
                 buf->avail;
     wt = writeout( out, DEFRTSPCHN, buf->offs, towrite,
-                   wtotal + towrite == rtsp_len, stats );
-    if ( ((int) wt) < 0 )
+                   wtotal + towrite == rtsplen, stats );
+    if ( ((int) wt) < 0 ) {
+      perror( "Unable to send/write the RTSP packet" );
       return 1;
+    }
     if ( wt != towrite )
       write_err = 1;
 
     wtotal += towrite;
-    skip( buf, towrite );
+    if ( skip( buf, towrite ) != 0 )
+      return 1;
   }
 
   if ( write_err )
