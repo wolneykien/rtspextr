@@ -54,6 +54,7 @@
 struct input {
   FILE *stream;
   int sock;
+  size_t pos;
 };
 
 struct stats {
@@ -67,8 +68,10 @@ struct stats {
   size_t write_err;
   size_t dumped;
   size_t other;
+  int otherflag;
   size_t total;
   size_t reported;
+  size_t lastpos;
 };
 
 struct binpkt {
@@ -175,7 +178,7 @@ void main( int argc, char **argv )
   struct stats stats;
   int ret = 0;
 
-  struct input in = { stdin, -1 };
+  struct input in = { stdin, -1, 0 };
   struct output out = { -1, NULL, NULL, 0 };
 
 #ifdef UDP
@@ -416,6 +419,8 @@ int read_next( struct input *in, struct bufdesc *buf )
   buf->offs = buf->buf;
   buf->avail += rd;
 
+  in->pos += rd;
+
   return 0;
 }
 
@@ -457,12 +462,25 @@ enum ptype find_pkt( struct input *in, struct bufdesc *buf,
   while ( ret == 0 ) {
     while ( buf->avail >= 4 ) {
       if ( *buf->offs == 0x24 ) {
+        stats->otherflag = 0;
+        stats->lastpos = in->pos - buf->avail;
         return BIN;
       }
       if ( strncmp( (char *) buf->offs, "RTSP", 4 ) == 0 ) {
+        stats->otherflag = 0;
+        stats->lastpos = in->pos - buf->avail;
         return RTSP;
       }
 
+      if ( !stats->otherflag ) {
+        stats->otherflag = 1;
+        fprintf( stderr, "Unknown data at %08lx + %02lx, " \
+                         "last packet at %08lx + %02lx\n",
+                 ((in->pos - buf->avail) / 16) * 16,
+                 (in->pos - buf->avail) % 16,
+                 (stats->lastpos / 16) * 16,
+                 stats->lastpos % 16 );
+      }
       stats->other++;
       if ( skip( buf, 1 ) != 0 )
         return ERR;
