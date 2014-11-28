@@ -35,6 +35,9 @@
 #define DEFDUMPPATH "rtp.%s.pcap" /* */
 #define DEFRTSPCHN 256
 
+#define DEFMAXCHN 16
+#define DEFMAXLEN 2048
+
 #define DEFREPORTCOUNT 1024
 
 #define SENDWHOLE
@@ -454,6 +457,9 @@ int unskip( struct bufdesc *buf, size_t tounskip )
   return 0;
 }
 
+int peek_bin_header( struct input *in, struct bufdesc *buf,
+                     struct binpkt *hdr );
+
 enum ptype find_pkt( struct input *in, struct bufdesc *buf,
                      struct stats *stats )
 {
@@ -462,9 +468,14 @@ enum ptype find_pkt( struct input *in, struct bufdesc *buf,
   while ( ret == 0 ) {
     while ( buf->avail >= 4 ) {
       if ( *buf->offs == 0x24 ) {
-        stats->otherflag = 0;
-        stats->lastpos = in->pos - buf->avail;
-        return BIN;
+        struct binpkt binhdr;
+        if ( peek_bin_header( in, buf, &binhdr ) != 0 )
+          return ERR;
+        if ( binhdr.chn <= DEFMAXCHN && binhdr.len <= DEFMAXLEN ) {
+          stats->otherflag = 0;
+          stats->lastpos = in->pos - buf->avail;
+          return BIN;
+        }
       }
       if ( strncmp( (char *) buf->offs, "RTSP", 4 ) == 0 ) {
         stats->otherflag = 0;
@@ -504,7 +515,7 @@ int read_ahead( struct input *in, struct bufdesc *buf )
   }
 }
 
-int read_bin_header( struct input *in, struct bufdesc *buf,
+int peek_bin_header( struct input *in, struct bufdesc *buf,
                      struct binpkt *hdr )
 {
   int ret = 0;
@@ -527,6 +538,18 @@ int read_bin_header( struct input *in, struct bufdesc *buf,
   hdr->mark = (char) *buf->offs;
   hdr->chn = *(buf->offs + 1);
   hdr->len = ntohs( *((uint16_t *) (buf->offs + 2)) );
+
+  return 0;
+}
+
+int read_bin_header( struct input *in, struct bufdesc *buf,
+                     struct binpkt *hdr )
+{
+  int ret = 0;
+
+  ret = peek_bin_header( in, buf, hdr );
+  if ( ret != 0 )
+    return ret;
 
   if ( skip( buf, 4 ) != 0 )
     return 1;
