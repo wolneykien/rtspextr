@@ -1,0 +1,58 @@
+digraph G {
+  dpi = 75;
+  rankdir = LR;
+
+subgraph pre {
+  label = "pre";
+
+  MX [shape = box style = filled color = lightblue];
+  tcpdump;
+  "UDP.pcap" [shape = box];
+  "editcap -42";
+  "TCP.pcap" [shape = box];
+  tcpflow;
+  "RTSP.raw" [shape = box];
+}
+
+subgraph core {
+  label = "core";
+
+  rtspextr;
+  "RTP.pcap" [shape = box];
+  "RTCP.pcap" [shape = box];
+  "RTSP-reply.pcap" [shape = box];
+  videosnarf;
+  "h264" [shape = box];
+}
+
+subgraph post {
+  label = "post";
+
+  SDP [shape = box style = dashed];
+  "SPS/PPS" [shape = box style = dashed];
+  "avconv -r 25";
+  "MP4" [shape = box style = filled color = green];
+}
+
+MX -> tcpdump;
+tcpdump -> "UDP.pcap";
+"UDP.pcap" -> "editcap -42";
+"editcap -42" -> "TCP.pcap";
+"TCP.pcap" -> tcpflow;
+tcpflow -> "RTSP.raw";
+
+"RTSP.raw" -> rtspextr;
+rtspextr -> "RTP.pcap";
+rtspextr -> "RTCP.pcap";
+rtspextr -> "RTSP-reply.pcap";
+"RTP.pcap" -> videosnarf;
+videosnarf -> "h264";
+
+"RTSP-reply.pcap" -> SDP [style = dashed];
+SDP -> "SPS/PPS" [style = dashed];
+"SPS/PPS" -> "h264" [style = dashed];
+"h264" -> "avconv -r 25";
+"avconv -r 25" -> "MP4";
+
+{ rank = same; MX; rtspextr }
+}
