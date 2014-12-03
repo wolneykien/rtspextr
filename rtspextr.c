@@ -54,6 +54,37 @@
 
 #endif
 
+
+struct params {
+#ifdef UDP
+  char *destip;
+  uint16_t destport;
+#endif
+#ifdef UNIX
+  char *sockpath;
+#endif
+#ifdef PCAP
+  char *dumppath;
+#endif
+  int maxchn;
+  size_t maxlen;
+  size_t reportcount;
+} varparams = {
+#ifdef UDP
+  DEFIP, DEFPORT,
+#endif
+#ifdef UNIX
+DEFSOCKPATH,
+#endif
+#ifdef PCAP
+  DEFDUMPPATH,
+#endif
+  DEFMAXCHN, DEFMAXLEN, DEFREPORTCOUNT, /* */
+}; /* */
+
+struct params *params = &varparams; /* */
+
+
 struct input {
   FILE *stream;
   int sock;
@@ -160,6 +191,13 @@ struct output {
   struct sockaddr *srcaddr;
   struct sockaddr *destaddr;
   socklen_t addrlen;
+#ifdef UDP
+  struct sockaddr_in destaddr_in;
+#endif
+#ifdef UNIX
+  struct sockaddr_un srcaddr_un;
+  struct sockaddr_un destaddr_un;
+#endif
 #ifdef PCAP
   pcap_t *pcap;
   pcap_dumper_t *dumpers[ DEFRTSPCHN + 1 ];
@@ -167,11 +205,22 @@ struct output {
 #endif
 };
 
+
 int rtspextr( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats );
 int close_input( struct input *in );
 int close_output( struct output *out );
 void report_stats( struct stats *stats );
+
+#ifdef UDP
+int init_socket_udp( struct output *out );
+#endif
+#ifdef UNIX
+int init_socket_unix( struct output *out );
+#endif
+#ifdef PCAP
+int init_pcap( struct output *out );
+#endif
 
 
 void main( int argc, char **argv )
@@ -185,51 +234,21 @@ void main( int argc, char **argv )
   struct output out = { -1, NULL, NULL, 0 };
 
 #ifdef UDP
-  struct sockaddr_in destaddr_in;
-  out.sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
-  if ( out.sock < 0 ) {
-    fprintf( stderr, "Unable to open output socket\n" );
-    ret = 1;
+  if ( ret == 0 && out.sock < 0 ) {
+    ret = init_socket_udp( &out );
   }
-  destaddr_in.sin_family = AF_INET;
-  destaddr_in.sin_port = htons( DEFPORT );
-  if ( inet_aton( DEFIP, &destaddr_in.sin_addr ) == 0 ) {
-    fprintf( stderr, "Incorrect IP address: %s\n", DEFIP );
-    ret = 1;
-  }
-  out.destaddr = (struct sockaddr *) &destaddr_in;
-  out.addrlen = sizeof( destaddr_in );
 #endif
 
 #ifdef UNIX
-  struct sockaddr_un srcaddr_un;
-  struct sockaddr_un destaddr_un;
-  out.sock = socket( AF_UNIX, SOCK_DGRAM, 0 );
-  destaddr_un.sun_family = AF_UNIX;
-  out.destaddr = (struct sockaddr *) &destaddr_un;
-  out.addrlen = sizeof( destaddr_un );
-  if ( out.sock < 0 ) {
-    fprintf( stderr, "Unable to open the socket\n" );
-    ret = 1;
+  if ( ret == 0 && out.sock < 0 ) {
+    ret = init_socket_unix( &out );
   }
-  srcaddr_un.sun_family = AF_UNIX;
-  snprintf( srcaddr_un.sun_path, sizeof( srcaddr_un.sun_path ),
-           "%s%s", DEFSOCKPATH, "out" );
-  unlink( srcaddr_un.sun_path );
-  out.srcaddr = (struct sockaddr *) &srcaddr_un;
-  ret = bind( out.sock, out.srcaddr, out.addrlen );
-  if ( ret != 0 )
-    perror( "Unable to bind the socket" );
 #endif
 
 #ifdef PCAP
-  out.pcap = pcap_open_dead( DLT_EN10MB, PKTBUFSIZE );
-  if ( out.pcap == NULL ) {
-    fprintf( stderr, "Unable to get the libpcap handle\n" );
-    ret = 1;
+  if ( ret == 0 && out.pcap == NULL ) {
+    ret = init_pcap( &out );
   }
-
-  memcpy( out.pktbuf, &pkthdr, sizeof( pkthdr ) );
 #endif
 
   memset( &stats, 0, sizeof( stats ) );
@@ -244,6 +263,87 @@ void main( int argc, char **argv )
 
   exit( ret );
 }
+
+#ifdef UDP
+int init_socket_udp( struct output *out )
+{
+  if ( out->sock >= 0 ) {
+    fprintf( stderr, "Socket already open\n" );
+    return 1;
+  }
+
+  out->sock = socket( AF_INET, SOCK_DGRAM, IPPROTO_UDP );
+  if ( out->sock < 0 ) {
+    fprintf( stderr, "Unable to open output socket\n" );
+    return 1;
+  }
+
+  out->destaddr_in.sin_family = AF_INET;
+  out->destaddr_in.sin_port = htons( DEFPORT );
+  if ( inet_aton( DEFIP, &out->destaddr_in.sin_addr ) == 0 ) {
+    fprintf( stderr, "Incorrect IP address: %s\n", DEFIP );
+    return 1;
+  }
+
+  out->destaddr = (struct sockaddr *) &out->destaddr_in;
+  out->addrlen = sizeof( out->destaddr_in );
+
+  return 0;
+}
+#endif
+
+#ifdef UNIX
+int init_socket_unix( struct output *out )
+{
+  if ( out->sock >= 0 ) {
+    fprintf( stderr, "Socket already open\n" );
+    return 1;
+  }
+
+  int ret = 0;
+
+  out->sock = socket( AF_UNIX, SOCK_DGRAM, 0 );
+  out->destaddr_un.sun_family = AF_UNIX;
+  out->destaddr = (struct sockaddr *) &out->destaddr_un;
+  out->addrlen = sizeof( out->destaddr_un );
+  if ( out->sock < 0 ) {
+    fprintf( stderr, "Unable to open the socket\n" );
+    return 1;
+  }
+
+  out->srcaddr_un.sun_family = AF_UNIX;
+  snprintf( out->srcaddr_un.sun_path,
+            sizeof( out->srcaddr_un.sun_path ),
+           "%s%s", DEFSOCKPATH, "out" );
+  unlink( out->srcaddr_un.sun_path );
+  out->srcaddr = (struct sockaddr *) &out->srcaddr_un;
+  ret = bind( out->sock, out->srcaddr, out->addrlen );
+
+  if ( ret != 0 )
+    perror( "Unable to bind the socket" );
+
+  return ret;
+}
+#endif
+
+#ifdef PCAP
+int init_pcap( struct output *out )
+{
+  if ( out->pcap != NULL ) {
+    fprintf( stderr, "PCAP already initialized\n" );
+    return 1;
+  }
+
+  out->pcap = pcap_open_dead( DLT_EN10MB, PKTBUFSIZE );
+  if ( out->pcap == NULL ) {
+    fprintf( stderr, "Unable to get the libpcap handle\n" );
+    return 1;
+  }
+
+  memcpy( out->pktbuf, &pkthdr, sizeof( pkthdr ) );
+  return 0;
+}
+#endif
 
 int close_input( struct input *in ) {
   int ret = 0;
