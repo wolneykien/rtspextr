@@ -36,6 +36,8 @@
 #endif
 
 #include <errno.h>
+#include <getopt.h>
+
 
 #define BUFSIZE 65536
 
@@ -241,6 +243,7 @@ int init_socket_unix( struct output *out );
 int init_pcap( struct output *out );
 #endif
 
+void parse_opts( int argc, char **argv );
 
 void main( int argc, char **argv )
 {
@@ -248,6 +251,8 @@ void main( int argc, char **argv )
   struct bufdesc bufdesc = { buf, sizeof( buf ), buf, 0 };
   struct stats stats;
   int ret = 0;
+
+  parse_opts( argc, argv );
 
   struct input in;
   in.stream = stdin;
@@ -297,6 +302,103 @@ void main( int argc, char **argv )
   close_input( &in );
 
   exit( ret );
+}
+
+void print_help( int argc, char **argv )
+{
+  fprintf( stdout, "Usage %s [ options ]\n", argv[0] );
+}
+
+void parse_opts( int argc, char **argv )
+{
+  int c;
+  int optidx;
+  char *endptr;
+
+  static struct option opts[] = {
+    { "help", no_argument, NULL, 'h' },
+    { "quiet", no_argument, NULL, 'q' },
+#ifdef UDP
+    { "udp", required_argument, NULL, 'u' },
+#endif
+#ifdef UNIX
+    { "unix", required_argument, NULL, 'U' },
+#endif
+#ifdef PCAP
+    { "pcap", required_argument, NULL, 'P' },
+#endif
+    { "maxchn", required_argument, NULL, 'C' },
+    { "maxlen", required_argument, NULL, 'L' },
+    { "reportevery", required_argument, NULL, 'R' },
+    { NULL, 0, NULL, 0 }
+  };
+
+  while ( (c = getopt_long( argc, argv, "hqu:U:P:C:L:R:",
+                            opts, &optidx )) >= 0 )
+  {
+    switch (c) {
+    case 0:
+      fprintf( stderr, "Unexpected long option: %s\n",
+               opts[optidx].name );
+      exit( -1 );
+    case 'h':
+      print_help( argc, argv );
+      exit( 0 );
+    case 'q':
+      params->reportcount = 0;
+      break;;
+#ifdef UDP
+    case 'u':
+      params->destip = strtok( optarg, ":" );
+      if ( params->destip == NULL ) {
+        fprintf( stderr, "Invalid IP:PORT string: %s\n", optarg );
+        exit( -1 );
+      }
+      params->destport =
+        (uint16_t) strtoul( optarg, &endptr, 10 );
+      if ( endptr ) {
+        fprintf( stderr, "Invalid IP:PORT string: %s\n", optarg );
+        exit( -1 );
+      }
+      break;;
+#endif
+#ifdef UNIX
+    case 'U':
+      params->sockpath = optarg;
+      break;
+#endif
+#ifdef PCAP
+    case 'P':
+      params->dumppath = optarg;
+      break;;
+#endif
+    case 'C':
+      params->maxchn = (int) strtol( optarg, &endptr, 10 );
+      if ( endptr ) {
+        fprintf( stderr, "Invalid number: %s\n", optarg );
+        exit( -1 );
+      }
+      break;
+    case 'L':
+      params->maxlen = (int) strtol( optarg, &endptr, 10 );
+      if ( endptr ) {
+        fprintf( stderr, "Invalid number: %s\n", optarg );
+        exit( -1 );
+      }
+      break;
+    case 'R':
+      params->reportcount = (size_t) strtoul( optarg, &endptr, 10 );
+      if ( endptr ) {
+        fprintf( stderr, "Invalid number: %s\n", optarg );
+        exit( -1 );
+      }
+      break;
+    default:
+      fprintf( stderr, "Try `%s --help` for a biref help page\n",
+               argv[0] );
+      exit( -1 );
+    }
+  }
 }
 
 #ifdef UDP
@@ -501,6 +603,11 @@ int rtspextr( struct input *in, struct output *out,
 void report_stats( struct stats *stats )
 {
   int i;
+
+  if ( params->reportcount == 0 ) {
+    stats->reported = stats->total;
+    return;
+  }
 
   fprintf( stdout, "DEC Total packets detected: %lu\n",
            stats->total );
