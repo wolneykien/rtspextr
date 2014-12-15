@@ -21,10 +21,20 @@
 #include <string.h>
 #include <stdlib.h>
 #include <sys/types.h>
+
+#if defined(UDP) || defined(UNIX)
 #include <sys/socket.h>
+#endif
+
+#ifdef UDP
 #include <netinet/in.h>
-#include <sys/un.h>
 #include <arpa/inet.h>
+#endif
+
+#ifdef UNIX
+#include <sys/un.h>
+#endif
+
 #include <errno.h>
 
 #define BUFSIZE 65536
@@ -58,8 +68,8 @@
 struct params {
 #ifdef UDP
   char *destip;
-  uint16_t destport;
 #endif
+  uint16_t destport;
 #ifdef UNIX
   char *sockpath;
 #endif
@@ -71,10 +81,11 @@ struct params {
   size_t reportcount;
 } varparams = {
 #ifdef UDP
-  DEFIP, DEFPORT,
+  DEFIP,
 #endif
+  DEFPORT,
 #ifdef UNIX
-DEFSOCKPATH,
+  DEFSOCKPATH,
 #endif
 #ifdef PCAP
   DEFDUMPPATH,
@@ -87,7 +98,9 @@ struct params *params = &varparams; /* */
 
 struct input {
   FILE *stream;
+#ifdef UDP
   int sock;
+#endif
   size_t pos;
 };
 
@@ -187,17 +200,23 @@ struct pkthdr {
 #endif
 
 struct output {
+#if defined(UDP) || defined(UNIX)
   int sock;
   struct sockaddr *srcaddr;
   struct sockaddr *destaddr;
   socklen_t addrlen;
+
 #ifdef UDP
   struct sockaddr_in destaddr_in;
 #endif
+
 #ifdef UNIX
   struct sockaddr_un srcaddr_un;
   struct sockaddr_un destaddr_un;
 #endif
+
+#endif
+
 #ifdef PCAP
   pcap_t *pcap;
   pcap_dumper_t *dumpers[ DEFRTSPCHN + 1 ];
@@ -230,8 +249,24 @@ void main( int argc, char **argv )
   struct stats stats;
   int ret = 0;
 
-  struct input in = { stdin, -1, 0 };
-  struct output out = { -1, NULL, NULL, 0 };
+  struct input in;
+  in.stream = stdin;
+#ifdef UDP
+  in.sock = -1;
+#endif
+  in.pos = 0;
+
+  struct output out;
+#if defined(UDP) || defined(UNIX)
+  out.sock = -1;
+  out.srcaddr = NULL;
+  out.destaddr = NULL;
+  out.addrlen = 0;
+#endif
+#ifdef PCAP
+  out.pcap = NULL;
+  memset( out.dumpers, 0, sizeof( out.dumpers ) );
+#endif
 
 #ifdef UDP
   if ( ret == 0 && out.sock < 0 ) {
@@ -279,9 +314,9 @@ int init_socket_udp( struct output *out )
   }
 
   out->destaddr_in.sin_family = AF_INET;
-  out->destaddr_in.sin_port = htons( DEFPORT );
-  if ( inet_aton( DEFIP, &out->destaddr_in.sin_addr ) == 0 ) {
-    fprintf( stderr, "Incorrect IP address: %s\n", DEFIP );
+  out->destaddr_in.sin_port = htons( params->destport );
+  if ( inet_aton( params->destip, &out->destaddr_in.sin_addr ) == 0 ) {
+    fprintf( stderr, "Incorrect IP address: %s\n", params->destip );
     return 1;
   }
 
@@ -314,7 +349,7 @@ int init_socket_unix( struct output *out )
   out->srcaddr_un.sun_family = AF_UNIX;
   snprintf( out->srcaddr_un.sun_path,
             sizeof( out->srcaddr_un.sun_path ),
-           "%s%s", DEFSOCKPATH, "out" );
+           "%s%s", params->sockpath, "out" );
   unlink( out->srcaddr_un.sun_path );
   out->srcaddr = (struct sockaddr *) &out->srcaddr_un;
   ret = bind( out->sock, out->srcaddr, out->addrlen );
@@ -357,6 +392,7 @@ int close_input( struct input *in ) {
     in->stream = NULL;
   }
 
+#ifdef UDP
   if ( in->sock >= 0 ) {
     ret = close( in->sock );
     if ( ret != 0 ) {
@@ -365,17 +401,19 @@ int close_input( struct input *in ) {
     }
     in->sock = -1;
   }
+#endif
 
   return 0;
 }
 
 int close_output( struct output *out ) {
-  int p;
+  int i;
   int ret = 0;
 
+#if defined(UDP) || defined(UNIX)
   if ( out->sock >= 0 ) {
-    for( p = DEFPORT; p <= (DEFPORT + DEFRTSPCHN); p++ ) {
-      sendeof( out, p );
+    for( i = 0; i <= DEFRTSPCHN; i++ ) {
+      sendeof( out, i );
     }
     ret = close( out->sock );
     if ( ret != 0 ) {
@@ -384,19 +422,22 @@ int close_output( struct output *out ) {
       out->sock = -1;
     }
 
+#ifdef UNIX
     if ( ret == 0 ) {
       if ( out->destaddr->sa_family == AF_UNIX ) {
         unlink( ((struct sockaddr_un *)out->srcaddr)->sun_path );
       }
     }
+#endif
   }
+#endif
 
 #ifdef PCAP
   if ( out->pcap ) {
-    for( p = 0; p <= DEFRTSPCHN; p++ ) {
-      if ( out->dumpers[ p ] )
-        pcap_dump_close( out->dumpers[ p ] );
-      out->dumpers[ p ] = NULL;
+    for( i = 0; i <= DEFRTSPCHN; i++ ) {
+      if ( out->dumpers[ i ] )
+        pcap_dump_close( out->dumpers[ i ] );
+      out->dumpers[ i ] = NULL;
     }
   
     pcap_close( out->pcap );
@@ -420,7 +461,7 @@ int rtspextr( struct input *in, struct output *out,
   int ret = 0;
 
   while ( ret == 0 ) {
-    if ( stats->total - stats->reported >= DEFREPORTCOUNT ) {
+    if ( stats->total - stats->reported >= params->reportcount ) {
       report_stats( stats );
     }
 
@@ -513,10 +554,12 @@ int read_next( struct input *in, struct bufdesc *buf )
         return 255;
       }
     }
+#ifdef UDP
   } else if ( in->sock >= 0 ) {
     // TODO: implement packet reading (1 packet at a time)
     fprintf( stderr, "Socket input isn't implemented yet\n" );
     return 255;
+#endif
   }
 
   buf->offs = buf->buf;
@@ -571,7 +614,9 @@ enum ptype find_pkt( struct input *in, struct bufdesc *buf,
         struct binpkt binhdr;
         if ( peek_bin_header( in, buf, &binhdr ) != 0 )
           return ERR;
-        if ( binhdr.chn <= DEFMAXCHN && binhdr.len <= DEFMAXLEN ) {
+        if ( binhdr.chn <= params->maxchn &&
+             binhdr.len <= params->maxlen ) 
+        {
           stats->otherflag = 0;
           stats->lastpos = in->pos - buf->avail;
           return BIN;
@@ -662,13 +707,14 @@ int setoutport( struct output *out, int chn )
   struct sockaddr_in *destaddr_in;
   struct sockaddr_un *destaddr_un;
   char suff[ 5 ];
-  char dumppath[ sizeof( DEFDUMPPATH ) + 5 ];
+  char dumppath[ sizeof( params->dumppath ) + 5 ];
 
+#if defined(UDP) || defined(UNIX)
   if ( out->destaddr ) {
     switch ( out->destaddr->sa_family ) {
     case AF_INET:
       destaddr_in = (struct sockaddr_in *) out->destaddr;
-      destaddr_in->sin_port = htons( DEFPORT + chn );
+      destaddr_in->sin_port = htons( params->destport + chn );
       break;
     case AF_UNIX:
       destaddr_un = (struct sockaddr_un *) out->destaddr;
@@ -678,7 +724,7 @@ int setoutport( struct output *out, int chn )
         snprintf( suff, 5, "%s", "rtsp" );
       snprintf( destaddr_un->sun_path,
                 sizeof( destaddr_un->sun_path ),
-                DEFSOCKPATH, suff );
+                params->sockpath, suff );
       break;
     default:
       fprintf( stderr, "Unsupported destination address family: %i\n",
@@ -686,6 +732,7 @@ int setoutport( struct output *out, int chn )
       return 1;
     }
   }
+#endif
   
 #ifdef PCAP
   if ( out->pcap ) {
@@ -694,7 +741,7 @@ int setoutport( struct output *out, int chn )
         snprintf( suff, 5, "%i", chn );
       else
         snprintf( suff, 5, "%s", "rtsp" );
-      snprintf( dumppath, sizeof( dumppath ), DEFDUMPPATH, suff );
+      snprintf( dumppath, sizeof( dumppath ), params->dumppath, suff );
       out->dumpers[ chn ] = pcap_dump_open( out->pcap, dumppath );
       if ( out->dumpers[ chn ] == NULL ) {
         fprintf( stderr, "Unable to create the dumpfile %s\n",
@@ -703,13 +750,14 @@ int setoutport( struct output *out, int chn )
       }
     }
     struct pkthdr *bufhdr = (struct pkthdr *) out->pktbuf;
-    bufhdr->udp.dstport = htons( DEFPORT + chn );
+    bufhdr->udp.dstport = htons( params->destport + chn );
   }
 #endif
 
   return 0;
 }
 
+#if defined(UDP) || defined(UNIX)
 size_t sendout( struct output *out, int chn,
                 const void *buf, size_t towrite, int send )
 {
@@ -729,6 +777,7 @@ size_t sendout( struct output *out, int chn,
 
   return wt;
 }
+#endif
 
 #ifdef PCAP
 size_t dump( struct output *out, int chn,
@@ -776,6 +825,7 @@ size_t writeout( struct output *out, int chn,
   if ( setoutport( out, chn ) != 0 )
     return -1;
 
+#if defined(UDP) || defined(UNIX)
   if ( out->sock >=0 ) {
     ret = sendout( out, chn, buf, towrite, complete );
     if ( complete && ret == towrite ) {
@@ -784,6 +834,7 @@ size_t writeout( struct output *out, int chn,
     if ( ((int) ret) < 0 )
       return ret;
   }
+#endif
 
 #ifdef PCAP
   if ( out->pcap ) {
@@ -799,6 +850,7 @@ size_t writeout( struct output *out, int chn,
   return ret;
 }
 
+#if defined(UDP) || defined(UNIX)
 int sendeof( struct output *out, int chn )
 {
   int ret = 0;
@@ -819,6 +871,7 @@ int sendeof( struct output *out, int chn )
 
   return ret;
 }
+#endif
 
 int send_bin( struct input *in, struct output *out,
               struct bufdesc *buf, struct stats *stats )
