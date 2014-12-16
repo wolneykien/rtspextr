@@ -43,8 +43,10 @@
 
 #define DEFIP "127.0.0.1"
 #define DEFPORT 5440
-#define DEFSOCKPATH "/tmp/rtpsock.%s" /* */
-#define DEFDUMPPATH "rtp.%s.pcap" /* */
+#define DEFSOCKDIR "/tmp"
+#define DEFSOCKPATH "%s/rtpsock.%s" /* */
+#define DEFDUMPDIR "./"
+#define DEFDUMPPATH "%s/rtp.%s.pcap" /* */
 #define DEFRTSPCHN 256
 
 #define DEFMAXCHN 16
@@ -73,24 +75,24 @@ struct params {
 #endif
   uint16_t destport;
 #ifdef UNIX
-  char *sockpath;
+  char *sockdir;
 #endif
 #ifdef PCAP
-  char *dumppath;
+  char *dumpdir;
 #endif
   int maxchn;
   size_t maxlen;
   size_t reportcount;
 } varparams = {
 #ifdef UDP
-  DEFIP,
+  NULL,
 #endif
   DEFPORT,
 #ifdef UNIX
-  DEFSOCKPATH,
+  NULL,
 #endif
 #ifdef PCAP
-  DEFDUMPPATH,
+  NULL,
 #endif
   DEFMAXCHN, DEFMAXLEN, DEFREPORTCOUNT, /* */
 }; /* */
@@ -274,19 +276,19 @@ void main( int argc, char **argv )
 #endif
 
 #ifdef UDP
-  if ( ret == 0 && out.sock < 0 ) {
+  if ( ret == 0 && out.sock < 0 && params->destip ) {
     ret = init_socket_udp( &out );
   }
 #endif
 
 #ifdef UNIX
-  if ( ret == 0 && out.sock < 0 ) {
+  if ( ret == 0 && out.sock < 0 && params->sockdir) {
     ret = init_socket_unix( &out );
   }
 #endif
 
 #ifdef PCAP
-  if ( ret == 0 && out.pcap == NULL ) {
+  if ( ret == 0 && out.pcap == NULL && params->dumpdir ) {
     ret = init_pcap( &out );
   }
 #endif
@@ -323,15 +325,15 @@ void print_help( int argc, char **argv )
            "send RTP via UDP to IP:PORT" );
 #endif
 #ifdef UNIX
-  fprintf( stdout, "  %-29s   %s;\n",
-           "-U SOCK, --unix=SOCK",
-           "send RTP to the local socket SOCK" );
+  fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
+           "-U DIR, --unix=DIR",
+           "send RTP to the local socket", " ",
+           "'rtpsock.PORT' in the direcotry DIR" );
 #endif
 #ifdef PCAP
   fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
-           "-P FILE, --pcap=FILE",
-           "write down libpcap dump with RTP/UDP", " ",
-           "packets" );
+           "-P DIR, --pcap=DIR", "write down libpcap dump", " ",
+           "'rtp.PORT.pcap' to the directory DIR" );
 #endif
   fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
            "-C MAXCHN, --maxchn=MAXCHN",
@@ -401,12 +403,12 @@ void parse_opts( int argc, char **argv )
 #endif
 #ifdef UNIX
     case 'U':
-      params->sockpath = optarg;
+      params->sockdir = optarg;
       break;
 #endif
 #ifdef PCAP
     case 'P':
-      params->dumppath = optarg;
+      params->dumpdir = optarg;
       break;;
 #endif
     case 'C':
@@ -488,7 +490,7 @@ int init_socket_unix( struct output *out )
   out->srcaddr_un.sun_family = AF_UNIX;
   snprintf( out->srcaddr_un.sun_path,
             sizeof( out->srcaddr_un.sun_path ),
-           "%s%s", params->sockpath, "out" );
+           "%s%s", params->sockdir, "out" );
   unlink( out->srcaddr_un.sun_path );
   out->srcaddr = (struct sockaddr *) &out->srcaddr_un;
   ret = bind( out->sock, out->srcaddr, out->addrlen );
@@ -851,7 +853,7 @@ int setoutport( struct output *out, int chn )
   struct sockaddr_in *destaddr_in;
   struct sockaddr_un *destaddr_un;
   char suff[ 5 ];
-  char dumppath[ sizeof( params->dumppath ) + 5 ];
+  static char dumppath[ 1024 ];
 
 #if defined(UDP) || defined(UNIX)
   if ( out->destaddr ) {
@@ -868,7 +870,7 @@ int setoutport( struct output *out, int chn )
         snprintf( suff, 5, "%s", "rtsp" );
       snprintf( destaddr_un->sun_path,
                 sizeof( destaddr_un->sun_path ),
-                params->sockpath, suff );
+                DEFSOCKPATH, params->sockdir, suff );
       break;
     default:
       fprintf( stderr, "Unsupported destination address family: %i\n",
@@ -885,7 +887,7 @@ int setoutport( struct output *out, int chn )
         snprintf( suff, 5, "%i", chn );
       else
         snprintf( suff, 5, "%s", "rtsp" );
-      snprintf( dumppath, sizeof( dumppath ), params->dumppath, suff );
+      snprintf( dumppath, sizeof( dumppath ), params->dumpdir, suff );
       out->dumpers[ chn ] = pcap_dump_open( out->pcap, dumppath );
       if ( out->dumpers[ chn ] == NULL ) {
         fprintf( stderr, "Unable to create the dumpfile %s\n",
@@ -964,7 +966,7 @@ size_t writeout( struct output *out, int chn,
                  const void *buf, size_t towrite, int complete,
                  struct stats *stats )
 {
-  size_t ret = 0;
+  size_t ret = -1;
 
   if ( setoutport( out, chn ) != 0 )
     return -1;
