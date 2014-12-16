@@ -48,9 +48,9 @@
 #define DEFIP "127.0.0.1"
 #define DEFPORT 5440
 #define DEFSOCKDIR "/tmp"
-#define DEFSOCKPATH "%s/rtpsock.%s" /* */
+#define DEFSOCKPATH "%s/rtspextr.%s" /* */
 #define DEFDUMPDIR "./"
-#define DEFDUMPPATH "%s/rtp.%s.pcap" /* */
+#define DEFDUMPPATH "%s/%s.pcap" /* */
 #define DEFRTSPCHN 256
 
 #define DEFMAXCHN 16
@@ -325,18 +325,18 @@ void print_help( int argc, char **argv )
 #ifdef UDP
   fprintf( stdout, "  %-29s   %s;\n",
            "-u IP:PORT, --udp=IP:PORT",
-           "send RTP via UDP to IP:PORT" );
+           "send data via UDP to IP:PORT" );
 #endif
 #ifdef UNIX
   fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
            "-U DIR, --unix=DIR",
-           "send RTP to the local socket", " ",
-           "'rtpsock.PORT' in the direcotry DIR" );
+           "send data to the local socket", " ",
+           "'rtspextr.PORT' in the direcotry DIR" );
 #endif
 #ifdef PCAP
   fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
-           "-P DIR, --pcap=DIR", "write down libpcap dump", " ",
-           "'rtp.PORT.pcap' to the directory DIR" );
+           "-P DIR, --pcap=DIR", "write libpcap dumps", " ",
+           "'PORT.pcap' in the directory DIR" );
 #endif
   fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
            "-C MAXCHN, --maxchn=MAXCHN",
