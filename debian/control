@@ -1,0 +1,18 @@
+Source: rtspextr
+Section: main/misc
+Priority: extra
+Maintainer: Paul Wolneykien <p.wolneukien@metrotek.spb.ru>
+Build-Depends: debhelper (>= 8.0.0), dh-autoreconf
+Standards-Version: 3.9.2
+Homepage: http://metrotek.spb.ru/
+
+Package: rtspextr
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: An RTSP-stream analyser/extractor
+
+Package: rtspextr-dbg
+Architecture: any
+Depends: rtspextr
+Description: An RTSP-stream analyser/extractor
+ This package contains the debugging information (symbols).
