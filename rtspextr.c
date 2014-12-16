@@ -83,6 +83,7 @@ struct params {
   int maxchn;
   size_t maxlen;
   size_t reportcount;
+  int dosend;
 } varparams = {
 #ifdef UDP
   NULL,
@@ -95,6 +96,7 @@ struct params {
   NULL,
 #endif
   DEFMAXCHN, DEFMAXLEN, DEFREPORTCOUNT, /* */
+  0,
 }; /* */
 
 struct params *params = &varparams; /* */
@@ -278,18 +280,21 @@ void main( int argc, char **argv )
 #ifdef UDP
   if ( ret == 0 && out.sock < 0 && params->destip ) {
     ret = init_socket_udp( &out );
+    params->dosend = 1;
   }
 #endif
 
 #ifdef UNIX
-  if ( ret == 0 && out.sock < 0 && params->sockdir) {
+  if ( ret == 0 && out.sock < 0 && params->sockdir ) {
     ret = init_socket_unix( &out );
+    params->dosend = 1;
   }
 #endif
 
 #ifdef PCAP
   if ( ret == 0 && out.pcap == NULL && params->dumpdir ) {
     ret = init_pcap( &out );
+    params->dosend = 1;
   }
 #endif
 
@@ -670,8 +675,10 @@ void report_stats( struct stats *stats )
            stats->tbin_b );
   fprintf( stdout, "SENT Packets sent: %lu\n",
            stats->sent );
-  fprintf( stdout, "ERR Send/dump errors: %lu\n",
-           stats->write_err );
+  if ( params->dosend ) {
+    fprintf( stdout, "ERR Send/dump errors: %lu\n",
+             stats->write_err );
+  }
   fprintf( stdout, "UNDET Uknown traffic, bytes: %lu\n",
           stats->other );
   fprintf( stdout, "\n" );
@@ -887,7 +894,8 @@ int setoutport( struct output *out, int chn )
         snprintf( suff, 5, "%i", chn );
       else
         snprintf( suff, 5, "%s", "rtsp" );
-      snprintf( dumppath, sizeof( dumppath ), params->dumpdir, suff );
+      snprintf( dumppath, sizeof( dumppath ), DEFDUMPPATH,
+                params->dumpdir, suff );
       out->dumpers[ chn ] = pcap_dump_open( out->pcap, dumppath );
       if ( out->dumpers[ chn ] == NULL ) {
         fprintf( stderr, "Unable to create the dumpfile %s\n",
@@ -966,7 +974,7 @@ size_t writeout( struct output *out, int chn,
                  const void *buf, size_t towrite, int complete,
                  struct stats *stats )
 {
-  size_t ret = -1;
+  size_t ret = 0;
 
   if ( setoutport( out, chn ) != 0 )
     return -1;
