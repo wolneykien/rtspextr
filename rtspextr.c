@@ -56,9 +56,7 @@
 
 #define SENDWHOLE
 
-#undef UDP // #define UDP
-#undef UNIX // #define UNIX
-#define PCAP
+#include <config.h>
 
 #ifdef PCAP
 #include <pcap/pcap.h>
