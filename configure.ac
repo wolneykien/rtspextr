@@ -44,7 +44,7 @@ fi
 # Checks for common header files.
 AC_CHECK_HEADERS([stdint.h stdlib.h string.h])
 
-AM_CONDITIONAL(PCAP, [test "$HAVE_PCAP" = "yes"])
+AM_CONDITIONAL(PCAP, [test "$HAVE_PCAP" = "1"])
 
 # Checks for typedefs, structures, and compiler characteristics.
 AC_TYPE_SIZE_T

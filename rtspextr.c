@@ -22,6 +22,10 @@
 #include <stdlib.h>
 #include <sys/types.h>
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #if defined(UDP) || defined(UNIX)
 #include <sys/socket.h>
 #endif
@@ -55,8 +59,6 @@
 #define DEFREPORTCOUNT 1024
 
 #define SENDWHOLE
-
-#include <config.h>
 
 #ifdef PCAP
 #include <pcap/pcap.h>
@@ -209,11 +211,9 @@ struct output {
   struct sockaddr *srcaddr;
   struct sockaddr *destaddr;
   socklen_t addrlen;
-
 #ifdef UDP
   struct sockaddr_in destaddr_in;
 #endif
-
 #ifdef UNIX
   struct sockaddr_un srcaddr_un;
   struct sockaddr_un destaddr_un;
@@ -863,10 +863,13 @@ int setoutport( struct output *out, int chn )
 #if defined(UDP) || defined(UNIX)
   if ( out->destaddr ) {
     switch ( out->destaddr->sa_family ) {
+#ifdef UDP
     case AF_INET:
       destaddr_in = (struct sockaddr_in *) out->destaddr;
       destaddr_in->sin_port = htons( params->destport + chn );
       break;
+#endif
+#ifdef UNIX
     case AF_UNIX:
       destaddr_un = (struct sockaddr_un *) out->destaddr;
       if ( chn != DEFRTSPCHN )
@@ -877,6 +880,7 @@ int setoutport( struct output *out, int chn )
                 sizeof( destaddr_un->sun_path ),
                 DEFSOCKPATH, params->sockdir, suff );
       break;
+#endif
     default:
       fprintf( stderr, "Unsupported destination address family: %i\n",
                out->destaddr->sa_family );
