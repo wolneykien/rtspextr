@@ -304,9 +304,46 @@ void main( int argc, char **argv )
   exit( ret );
 }
 
+
+extern char *basename (const char *__filename);
+
 void print_help( int argc, char **argv )
 {
-  fprintf( stdout, "Usage %s [ options ]\n", argv[0] );
+  fprintf( stdout, "Usage %s [ options ]\n", basename( argv[0] ) );
+  fprintf( stdout, "\n" );
+  fprintf( stdout, "Options:\n" );
+  fprintf( stdout, "\n" );
+  fprintf( stdout, "  %-29s   %s;\n",
+           "-h, --help", "print this help screen" );
+  fprintf( stdout, "  %-29s   %s;\n",
+           "-q, --quiet", "output nothing" );
+#ifdef UDP
+  fprintf( stdout, "  %-29s   %s;\n",
+           "-u IP:PORT, --udp=IP:PORT",
+           "send RTP via UDP to IP:PORT" );
+#endif
+#ifdef UNIX
+  fprintf( stdout, "  %-29s   %s;\n",
+           "-U SOCK, --unix=SOCK",
+           "send RTP to the local socket SOCK" );
+#endif
+#ifdef PCAP
+  fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
+           "-P FILE, --pcap=FILE",
+           "write down libpcap dump with RTP/UDP", " ",
+           "packets" );
+#endif
+  fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
+           "-C MAXCHN, --maxchn=MAXCHN",
+           "limit the possible channel number", " ",
+           "to MAXCHN" );
+  fprintf( stdout, "  %-29s   %s\n%34s%s;\n",
+           "-L MAXLEN, --maxlen=MAXLEN",
+           "limit the possible packet length", " ",
+           "to MAXLEN" );
+  fprintf( stdout, "  %-29s   %s.\n",
+           "-R COUNT, --reportevery=COUNT",
+           "print report every COUNT packets" );
 }
 
 void parse_opts( int argc, char **argv )
@@ -395,7 +432,7 @@ void parse_opts( int argc, char **argv )
       break;
     default:
       fprintf( stderr, "Try `%s --help` for a biref help page\n",
-               argv[0] );
+               basename( argv[0] ) );
       exit( -1 );
     }
   }
