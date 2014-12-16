@@ -2,7 +2,7 @@ Source: rtspextr
 Section: main/misc
 Priority: extra
 Maintainer: Paul Wolneykien <p.wolneukien@metrotek.spb.ru>
-Build-Depends: debhelper (>= 8.0.0), dh-autoreconf
+Build-Depends: debhelper (>= 8.0.0), dh-autoreconf, libpcap-dev
 Standards-Version: 3.9.2
 Homepage: http://metrotek.spb.ru/
 
