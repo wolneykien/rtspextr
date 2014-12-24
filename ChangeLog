@@ -1,0 +1,19 @@
+2014-12-24  Paul Wolneykien  <p.wolneykien@metrotek.spb.ru>
+
+	* Version 0.1.1.
+
+	* rtspextr.md: Updated the manual page
+
+2014-12-16  Paul Wolneykien  <p.wolneykien@metrotek.spb.ru>
+
+	* Version 0.1.0.
+
+	* rtspextr.md: Added the manual page
+
+	* debian/*: Added debian spec
+
+	* Makefile.am, configure.ac: Build with Autotools
+
+	* rtspextr.c (print_help): Print out the brief help page
+
+	* rtspextr.c (parse_opts): Parse the input arguments

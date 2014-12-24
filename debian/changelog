@@ -1,3 +1,9 @@
+rtspextr (0.1.1-1) experimental; urgency=low
+
+  * Version: 0.1.1.
+
+ -- Paul Wolneykien <p.wolneykien@metrotek.spb.ru>  Wed, 24 Dec 2014 11:51:00 +0300
+
 rtspextr (0.1.0-1) experimental; urgency=low
 
   * Initial release.
