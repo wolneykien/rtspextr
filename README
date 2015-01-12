@@ -11,19 +11,19 @@ The following options are handled:
     print this help screen;
 * `-q`, `--quiet`:
     output nothing;
-* `-u` <IP>:<PORT>, `--udp=`<IP>:<PORT>:
+* `-u <IP>:<PORT>`, `--udp=<IP>:<PORT>`:
     send data via UDP to IP:(PORT + CHN);
-* `-U` <DIR>, `--unix=`<DIR>:
+* `-U <DIR>`, `--unix=<DIR>`:
     send data to the local socket 'rtspextr.CHN' in the direcotry DIR;
-* `-P` <DIR>, `--pcap=`<DIR>:
+* `-P <DIR>`, `--pcap=<DIR>`:
     write down libpcap dumps CHN.pcap' to the directory DIR (the
     option is available only when the program is built with libpcap
     support);
-* `-C` <MAXCHN>, `--maxchn=`<MAXCHN>:
+* `-C <MAXCHN>`, `--maxchn=<MAXCHN>`:
     limit the possible channel number to MAXCHN;
-* `-L` <MAXLEN>, `--maxlen=`<MAXLEN>:
+* `-L <MAXLEN>`, `--maxlen=<MAXLEN>`:
     limit the possible packet length to MAXLEN;
-* `-R` <COUNT>, `--reportevery=`<COUNT>:
+* `-R <COUNT>`, `--reportevery=<COUNT>`:
     print report every COUNT packets.
 
 
@@ -31,7 +31,7 @@ The *CHN* parameter above is the RTSP channel number (0--255).
 It is used as suffix for socket and dump filenames. The special value
 "rtsp" is used as suffix to send/dump the RTSP-data itself. When
 retransmitting packages via UDP, the RTSP-data is always sent with
-*PORT*+256 as the destination port number.
+*PORT* + 256 as the destination port number.
 
 In order to improve the RTSP stream identification by filtering out
 the garbage trafic the valid channel value range is narrowed to 0--16

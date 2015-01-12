@@ -42,7 +42,7 @@ The *CHN* parameter above is the RTSP channel number (0--255).
 It is used as suffix for socket and dump filenames. The special value
 "rtsp" is used as suffix to send/dump the RTSP-data itself. When
 retransmitting packages via UDP, the RTSP-data is always sent with
-*PORT*+256 as the destination port number.
+*PORT* + 256 as the destination port number.
 
 In order to improve the RTSP stream identification by filtering out
 the garbage trafic the valid channel value range is narrowed to 0--16
