@@ -1,3 +1,10 @@
+2015-02-16  Paul Wolneykien  <p.wolneykien@metrotek.spb.ru>
+
+	* Version 0.1.2.
+        * Better RTSP parsing.
+        * Better command-line argument parsing.
+	* New option `-e`: ignore errors.
+
 2014-12-24  Paul Wolneykien  <p.wolneykien@metrotek.spb.ru>
 
 	* Version 0.1.1.

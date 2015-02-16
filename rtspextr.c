@@ -84,6 +84,7 @@ struct params {
   size_t maxlen;
   size_t reportcount;
   int dosend;
+  int ignore_errors;
 } varparams = {
 #ifdef UDP
   NULL,
@@ -96,7 +97,7 @@ struct params {
   NULL,
 #endif
   DEFMAXCHN, DEFMAXLEN, DEFREPORTCOUNT, /* */
-  0,
+  0, 0,
 }; /* */
 
 struct params *params = &varparams; /* */
@@ -349,6 +350,9 @@ void print_help( int argc, char **argv )
   fprintf( stdout, "  %-29s   %s.\n",
            "-R COUNT, --reportevery=COUNT",
            "print report every COUNT packets" );
+  fprintf( stdout, "  %-29s   %s.\n",
+           "-e, --ignore-errors",
+           "ignore the errors" );
 }
 
 void parse_opts( int argc, char **argv )
@@ -372,10 +376,11 @@ void parse_opts( int argc, char **argv )
     { "maxchn", required_argument, NULL, 'C' },
     { "maxlen", required_argument, NULL, 'L' },
     { "reportevery", required_argument, NULL, 'R' },
+    { "ignore-errors", no_argument, NULL, 'e' },
     { NULL, 0, NULL, 0 }
   };
 
-  while ( (c = getopt_long( argc, argv, "hqu:U:P:C:L:R:",
+  while ( (c = getopt_long( argc, argv, "hqu:U:P:C:L:R:e",
                             opts, &optidx )) >= 0 )
   {
     switch (c) {
@@ -435,6 +440,9 @@ void parse_opts( int argc, char **argv )
         exit( -1 );
       }
       break;
+    case 'e':
+      params->ignore_errors = 1;
+      break;;
     default:
       fprintf( stderr, "Try `%s --help` for a biref help page\n",
                basename( argv[0] ) );
@@ -618,6 +626,10 @@ int rtspextr( struct input *in, struct output *out,
       ret = send_bin( in, out, buf, stats );
       if ( ret != 0 ) {
         fprintf( stderr, "Unable to read/send binary packet\n" );
+        if ( params->ignore_errors ) {
+          fprintf( stderr, "Error ignored\n" );
+          ret = 0;
+        }
       }
       break;
     case RTSP:
@@ -626,6 +638,10 @@ int rtspextr( struct input *in, struct output *out,
       ret = send_rtsp( in, out, buf, stats );
       if ( ret != 0 ) {
         fprintf( stderr, "Unable to read/send RTSP packet\n" );
+        if ( params->ignore_errors ) {
+          fprintf( stderr, "Error ignored\n" );
+          ret = 0;
+        }
       }
       break;
     case EOS:

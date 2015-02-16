@@ -35,7 +35,9 @@ The following options are handled:
 * `-L` <MAXLEN>, `--maxlen=`<MAXLEN>:
     limit the possible packet length to MAXLEN;
 * `-R` <COUNT>, `--reportevery=`<COUNT>:
-    print report every COUNT packets.
+    print report every COUNT packets;
+* `-e`, `--ignore-errors`:
+    ignore the errors.
 
 
 The *CHN* parameter above is the RTSP channel number (0--255).
