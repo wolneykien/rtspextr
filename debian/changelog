@@ -1,3 +1,11 @@
+rtspextr (0.1.2-0.rc1) experimental; urgency=low
+
+  * Better RTSP parsing.
+  * Better command-line argument parsing.
+  * Version: 0.1.2.
+
+ -- Paul Wolneykien <p.wolneykien@metrotek.spb.ru>  Mon, 16 Feb 2015 13:15:00 +0300
+
 rtspextr (0.1.1-1) experimental; urgency=low
 
   * Version: 0.1.1.

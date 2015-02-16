@@ -398,7 +398,7 @@ void parse_opts( int argc, char **argv )
       }
       params->destport =
         (uint16_t) strtoul( optarg, &endptr, 10 );
-      if ( endptr ) {
+      if ( endptr && *endptr != '\0' ) {
         fprintf( stderr, "Invalid IP:PORT string: %s\n", optarg );
         exit( -1 );
       }
@@ -416,21 +416,21 @@ void parse_opts( int argc, char **argv )
 #endif
     case 'C':
       params->maxchn = (int) strtol( optarg, &endptr, 10 );
-      if ( endptr ) {
+      if ( endptr && *endptr != '\0' ) {
         fprintf( stderr, "Invalid number: %s\n", optarg );
         exit( -1 );
       }
       break;
     case 'L':
       params->maxlen = (int) strtol( optarg, &endptr, 10 );
-      if ( endptr ) {
+      if ( endptr && *endptr != '\0' ) {
         fprintf( stderr, "Invalid number: %s\n", optarg );
         exit( -1 );
       }
       break;
     case 'R':
       params->reportcount = (size_t) strtoul( optarg, &endptr, 10 );
-      if ( endptr ) {
+      if ( endptr && *endptr != '\0' ) {
         fprintf( stderr, "Invalid number: %s\n", optarg );
         exit( -1 );
       }
@@ -1133,8 +1133,8 @@ int parse_rtsp_status( char *str, struct stats *stats )
 
   char *namever = strtok_r( str, " \t", &ctx );
   if ( namever == NULL ) {
-    fprintf( stderr, "Error tokenize the RTSP status: %s\n",
-             "name/version" );
+    fprintf( stderr, "Error tokenize the RTSP name/version: %s\n",
+             str );
     return 1;
   }
   ret = sscanf( namever, "RTSP/%d.%d", &vhi, &vlo );
@@ -1146,8 +1146,11 @@ int parse_rtsp_status( char *str, struct stats *stats )
 
   char *codestr = strtok_r( NULL, " \t", &ctx );
   if ( codestr == NULL ) {
-    fprintf( stderr, "Error tokenize the RTSP status: %s\n",
-             "code" );
+    if ( strlen( ctx ) == 0 ) {
+      return 0;
+    }
+    fprintf( stderr, "Error tokenize the RTSP code: %s\n",
+             str );
     return 1;
   }
   ret = sscanf( codestr, "%d", &code );
@@ -1186,10 +1189,12 @@ int send_rtsp( struct input *in, struct output *out,
 {
   int ret = 0;
 
-  ret = read_ahead( in, buf );
-  if ( ret != 0 ) {
-    fprintf( stderr, "Unable to read the full RTSP header\n" );
-    return ret;
+  if ( buf->avail < 32 ) {
+    ret = read_ahead( in, buf );
+    if ( ret != 0 ) {
+      fprintf( stderr, "Unable to read the full RTSP header\n" );
+      return ret;
+    }
   }
 
   uint8_t *rtspoffs = buf->offs;
