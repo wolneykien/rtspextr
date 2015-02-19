@@ -28,8 +28,8 @@ Options:
                           default); if no inputfile is given then
                           stdin is used;
 
-   -e, --escape           insert the Emulation Prevention bytes (03)
-                          in NALU sequences;
+   -E, --no-escapes       do not insert the Emulation Prevention bytes
+                          (03) in NALU sequences;
 
    -i, --inplace          patch the h264 stream file inplace;
                           otherwise the patched stream is written to
@@ -77,10 +77,10 @@ fatal() {
 # Arguments parsing #
 #####################
 
-OPTS=`getopt -n $PROG -o v,V,h,s:,g,p,i,e -l verbose,version,help,sdp:,get,patch,inplace,escape -- "$@"` || ( ret=$?; show_usage; exit $ret ) >&2
+OPTS=`getopt -n $PROG -o v,V,h,s:,g,p,i,E -l verbose,version,help,sdp:,get,patch,inplace,no-escapes -- "$@"` || ( ret=$?; show_usage; exit $ret ) >&2
 eval set -- "$OPTS"
 
-verbose=; get_mode=; patch_mode=-p; inplace=; sdp=; escape=
+verbose=; get_mode=; patch_mode=-p; inplace=; sdp=; escape=-e
 while :; do
     case "$1" in
     -v|--verbose) verbose=-v;;
@@ -91,7 +91,7 @@ while :; do
             get_mode=-g
             patch_mode=
             ;;
-    -e|--escape) escape=-e;;
+    -E|--no-escapes) escape=;;
     -p|--patch)
             patch_mode=-p
             get_mode=
