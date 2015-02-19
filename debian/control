@@ -8,7 +8,7 @@ Homepage: http://metrotek.spb.ru/
 
 Package: rtspextr
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
+Depends: coreutils, bsdmainutils, ${shlibs:Depends}, ${misc:Depends}
 Description: An RTSP-stream analyser/extractor
 
 Package: rtspextr-dbg

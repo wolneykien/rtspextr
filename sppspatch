@@ -1,0 +1,205 @@
+#!/bin/sh -efu
+
+# v=0
+# m=video <multicast_port> RTP/AVP 96
+# c=IN IP4 <multicast_ip>
+# a=rtpmap:96 H264/90000
+# a=fmtp:96 sprop-parameter-sets=Z0IAKeKQFgJNgScFAQXh4kRU,aM48gA==
+# a=source-filter: incl IN IP4 <multicast_ip> <unicast_ip>
+
+PROG="${0##*/}"
+PROG_VERSION=0.1.0
+
+
+show_help() {
+    cat <<EOF
+Usage: $PROG [options] [-s <SDP-file>] [<inputfile>]
+
+$PROG patches the given h264 stream with SPS/PPS info taken from a
+SDP file. It also can be used to view the decoded SPS/PPS info.
+
+Options:
+
+   -g, --get              show decoded SPS/PPS; the SDP data is
+                          read from <inputfile>, the -s argument or
+                          stdin.
+
+   -p, --patch            patch the given h264 stream file (the
+                          default); if no inputfile is given then
+                          stdin is used;
+
+   -i, --inplace          patch the h264 stream file inplace;
+                          otherwise the patched stream is written to
+                          stdout;
+
+   -s FILE, --sdp=FILE    the file to read SDP data from;
+
+   -v, --verbose          be verbose;
+
+   -V, --version          print version information and exit;
+
+   -h, --help             print this help.
+EOF
+    exit 0
+}
+
+show_usage() {
+    echo
+    show_help | head -1
+    echo "Use \`$PROG --help\` for more information."
+}
+
+print_version()
+{
+    cat <<EOF
+$PROG version $PROG_VERSION
+EOF
+}
+
+write_error() {
+    printf "$@" >&2
+}
+
+info() {
+    [ -z "$verbose" ] || write_error "$@"
+}
+
+fatal() {
+    write_error "$@"
+    exit 1
+}
+
+
+#####################
+# Arguments parsing #
+#####################
+
+OPTS=`getopt -n $PROG -o v,V,h,s:,g,p,i -l verbose,version,help,sdp:,get,patch,inplace -- "$@"` || ( ret=$?; show_usage; exit $ret ) >&2
+eval set -- "$OPTS"
+
+verbose=; get_mode=; patch_mode=; inplace=; sdp=
+while :; do
+    case "$1" in
+    -v|--verbose) verbose=-v;;
+    -V|--version) print_version; exit 0;;
+    -h|--help) show_help;;
+    -s|--sdp) sdp=="$2"; shift;;
+    -g|--get) get_mode=-g;;
+    -p|--patch) patch_mode=-r;;
+    -i|--inplace) inplace=-i;;
+    --) shift; break;;
+    *)
+        fatal 'Unrecognized option: %s\n' "$1"
+        ;;
+    esac
+    shift
+done
+
+
+## Functions
+
+getspps()
+{
+    local sdp="${1:-}"
+
+    sed -n -e 's/^\(.\+[,;[:space:]]\+\)\?sprop-parameter-sets=\(.*\);\?$/\2/p' \
+        ${sdp:+"$sdp"}
+}
+
+getsps()
+{
+    sed -e 's/,.*$//'
+}
+
+getpps()
+{
+    sed -e 's/^.*,//'
+}
+
+writespps()
+{
+    local spps="$(getspps "$sdp")"
+    [ -n "$spps" ] || fatal 'SPS/PPS data not found!\n'
+
+    local ret=0
+
+    local sps="$(echo "$spps" | getsps)"
+    if [ -n "$sps" ]; then
+        echo "$sps" | base64 -d >"$workdir/sps" || ret=$?
+        [ $ret -eq 0 ] || fatal 'Invalid SPS data: %s\n' "$sps"
+    fi
+
+    local pps="$(echo "$spps" | getpps)"
+    if [ -n "$pps" ]; then
+        echo "$pps" | base64 -d >"$workdir/pps" || ret=$?
+        [ $ret -eq 0 ] || fatal 'Invalid PPS data: %s\n' "$pps"
+    fi
+}
+
+printinhex()
+{
+    local nalu="$1"
+    local file="${2:-}"
+
+    if [ -z "$file" ]; then
+        file="$nalu"
+        nalu=
+    fi
+
+    [ -s "$file" ] || return 0
+    
+    if [ -z "$nalu" ]; then
+        cat "$file" | hexdump -v -e '/1 "%02X "'
+    else
+        printf '%s' "$nalu"
+        cat "$file" | hexdump -v -e '/1 "%02X\n"' | \
+            while read byte; do
+                case "$byte" in
+                    00|01|02)
+                        
+            done
+        printf '\n'
+    fi
+}
+
+## Main
+
+workdir="$(mktemp -d "$PROG.XXXXXXXXXX")"
+
+cleanup()
+{
+    [ -z "$workdir" ] || rm -rf "$workdir"
+}
+trap "cleanup" EXIT
+
+
+if [ -n "$get_mode" ]; then
+    # Get mode
+    [ -n "$sdp" ] || sdp="${1:-}"
+
+    info 'Read SDP data from %s\n' "${sdp:-<stdin>}"
+
+    spps="$(getspps "$sdp")"
+    [ -n "$spps" ] || fatal 'SPS/PPS data not found!\n'
+
+    sps="$(echo "$spps" | getsps)"
+    [ -z "$sps" ] || \
+        printf 'SPS: %s\n' "$(echo "$sps" | base64 -d | printinhex)"
+
+    pps="$(echo "$spps" | getpps)"
+    [ -z "$pps" ] || \
+        printf 'PPS: %s\n' "$(echo "$pps" | base64 -d | printinhex)"
+else
+    # Patch mode
+    infile="${1:-}"
+    [ -n "$sdp" ] || fatal 'SDP file is not specified\n'
+
+    info 'Read SDP data from %s\n' "$sdp"
+    info 'Read h264 stream from %s\n' "${infile:-<stdin>}"
+    [ -z "$inplace" ] || info 'Patch the stream inplace\n'
+
+    spps="$(getspps "$sdp")"
+    [ -n "$spps" ] || fatal 'SPS/PPS data not found!\n'
+
+    
+fi
