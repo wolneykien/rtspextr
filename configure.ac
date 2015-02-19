@@ -2,7 +2,7 @@
 # Process this file with autoconf to produce a configure script.
 
 AC_PREREQ([2.69])
-AC_INIT([rtspextr], [0.1.2], [p.wolneykien@metrotek.spb.ru])
+AC_INIT([rtspextr], [0.1.3], [p.wolneykien@metrotek.spb.ru])
 
 AC_CONFIG_SRCDIR([rtspextr.c])
 AC_CONFIG_HEADERS([config.h])
