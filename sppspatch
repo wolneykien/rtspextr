@@ -162,24 +162,24 @@ writespps()
 
 printinhex()
 {
-    local startcode="$1"
+    local prefix="$1"
     local file="${2:-}"
     local zcnt=0
 
     if [ -z "$file" ]; then
-        file="$startcode"
-        startcode=
+        file="$prefix"
+        prefix=
     fi
 
     [ -s "$file" ] || return 0
     
-    if [ -z "$startcode" ]; then
+    if [ -z "$prefix" ]; then
         cat "$file" | hexdump -v -e '/1 "%02X "'
     elif [ -z "$escape" ]; then
-        printf '%s' "$startcode"
+        printf '%s' "$prefix"
         cat "$file" | hexdump -v -e '/1 " %02X"'
     else
-        printf '%s' "$startcode"
+        printf '%s' "$prefix"
         cat "$file" | hexdump -v -e '/1 "%02X\n"' | \
             while read byte; do
                 case "$byte" in
@@ -201,20 +201,12 @@ printinhex()
     fi
 }
 
-printspsinhex()
+hexbytes()
 {
-    local startcode="${1:-}"
-
-    [ ! -e "$workdir/sps" ] || \
-        printinhex ${startcode:+"$startcode"} "$workdir/sps"
-}
-
-printppsinhex()
-{
-    local startcode="${1:-}"
-
-    [ ! -e "$workdir/pps" ] || \
-        printinhex ${startcode:+"$startcode"} "$workdir/pps"
+    tr ' ' '\n' | \
+        while read hex; do
+            printf "\x$hex"
+        done
 }
 
 
@@ -233,8 +225,10 @@ if [ -n "$get_mode" ]; then
     # Get mode
     [ -n "$sdp" ] || sdp="${1:-}"
     writespps "$sdp"
-    [ ! -e "$workdir/sps" ] || printf 'SPS: %s\n' "$(printspsinhex)"
-    [ ! -e "$workdir/pps" ] || printf 'PPS: %s\n' "$(printppsinhex)"
+    [ ! -e "$workdir/sps" ] || \
+        printf 'SPS: %s\n' "$(printinhex "$workdir/sps")"
+    [ ! -e "$workdir/pps" ] || \
+        printf 'PPS: %s\n' "$(printinhex "$workdir/pps")"
 else
     # Patch mode
     infile="${1:-}"
@@ -243,10 +237,10 @@ else
     writespps "$sdp"
 
     [ -e "$workdir/sps" ] || fatal 'SPS data not found\n'
-    info 'SPS: %s\n' "$(printspsinhex)"
+    info 'SPS: %s\n' "$(printinhex "$workdir/sps")"
 
     [ -e "$workdir/pps" ] || fatal 'PPS data not found\n'
-    info 'PPS: %s\n' "$(printppsinhex)"
+    info 'PPS: %s\n' "$(printinhex "$workdir/pps")"
 
     info 'Read h264 stream from %s\n' "${infile:-<stdin>}"
     [ -z "$inplace" ] || info 'Patching the stream inplace\n'
@@ -254,6 +248,6 @@ else
     info 'Escaping is %s\n' \
         "$(if [ -n "$escape" ]; then echo 'on'; else echo 'off'; fi)"
 
-    printspsinhex '00 00 00 01'; echo
-    printppsinhex '00 00 00 01'; echo
+    printinhex '00 00 00 01' "$workdir/sps"; echo
+    printinhex '00 00 00 01' "$workdir/pps"; echo
 fi
