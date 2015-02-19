@@ -126,6 +126,21 @@ getpps()
     sed -e 's/^.*,//'
 }
 
+checkfirstbyte()
+{
+    local file="$1"
+    local ref="${2:-}"
+
+    if [ -z "$ref" ]; then
+        ref="$file"
+        file=
+    fi
+    
+    local byte="$(hexdump -n 1 -e '/1 "%02X"' ${file:+"$file"})"
+
+    [ "$byte" = "$ref" ]
+}
+
 writespps()
 {
     local sdp="$1"
@@ -141,9 +156,8 @@ writespps()
     if [ -n "$sps" ]; then
         echo "$sps" | base64 -d >"$workdir/sps" 2>/dev/null || ret=$?
         [ $ret -eq 0 ] || fatal 'Invalid SPS data: %s\n' "$sps"
-
-        local first="$(hexdump -n 1 -e '/1 "%02X"' "$workdir/sps")"
-        if [ "$first" = '68' ]; then
+        
+        if checkfirstbyte "$workdir/sps" 68; then
             mv "$workdir/sps" "$workdir/pps"
         fi
     fi
@@ -153,8 +167,7 @@ writespps()
         echo "$pps" | base64 -d >"$workdir/pps" 2>/dev/null || ret=$?
         [ $ret -eq 0 ] || fatal 'Invalid PPS data: %s\n' "$pps"
 
-        local first="$(hexdump -n 1 -e '/1 "%02X"' "$workdir/pps")"
-        if [ "$first" = '67' ]; then
+        if checkfirstbyte "$workdir/pps" 67; then
             mv "$workdir/pps" "$workdir/sps"
         fi
     fi
@@ -203,10 +216,22 @@ printinhex()
 
 hexbytes()
 {
-    tr ' ' '\n' | \
-        while read hex; do
-            printf "\x$hex"
+    (
+        tr ' ' '\n'
+        echo
+    ) | while read hex; do
+            [ -z "$hex" ] || /usr/bin/printf "\\x$hex"
         done
+}
+
+makenalu()
+{
+    local first="$1"
+    local file="$2"
+
+    prefix='00 00 00 01'
+    checkfirstbyte "$file" "$first" || prefix="$spsprefix $first"
+    printinhex "$prefix" "$file"
 }
 
 
@@ -243,11 +268,27 @@ else
     info 'PPS: %s\n' "$(printinhex "$workdir/pps")"
 
     info 'Read h264 stream from %s\n' "${infile:-<stdin>}"
-    [ -z "$inplace" ] || info 'Patching the stream inplace\n'
 
     info 'Escaping is %s\n' \
         "$(if [ -n "$escape" ]; then echo 'on'; else echo 'off'; fi)"
 
-    printinhex '00 00 00 01' "$workdir/sps"; echo
-    printinhex '00 00 00 01' "$workdir/pps"; echo
+    makenalu 67 "$workdir/sps" >"$workdir/spsnalu"
+    info 'SPS NALU: %s\n' "$(cat "$workdir/spsnalu")"
+
+    makenalu 68 "$workdir/pps" >"$workdir/ppsnalu"
+    info 'PPS NALU: %s\n' "$(cat "$workdir/ppsnalu")"
+    
+    if [ -z "$inplace" -o -z "$infile" ]; then
+        cat "$workdir/spsnalu" | hexbytes
+        cat "$workdir/ppsnalu" | hexbytes
+        cat "${infile:--}"
+    else
+        info 'Patching the stream inplace\n'
+        (
+            cat "$workdir/spsnalu" | hexbytes
+            cat "$workdir/ppsnalu" | hexbytes
+            cat "$infile"
+        ) >"$workdir/outfile"
+        mv "$workdir/outfile" "$infile"
+    fi
 fi
