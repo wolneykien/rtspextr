@@ -22,11 +22,14 @@ Options:
 
    -g, --get              show decoded SPS/PPS; the SDP data is
                           read from <inputfile>, the -s argument or
-                          stdin.
+                          stdin;
 
    -p, --patch            patch the given h264 stream file (the
                           default); if no inputfile is given then
                           stdin is used;
+
+   -e, --escape           insert the Emulation Prevention bytes (03)
+                          in NALU sequences;
 
    -i, --inplace          patch the h264 stream file inplace;
                           otherwise the patched stream is written to
@@ -74,18 +77,25 @@ fatal() {
 # Arguments parsing #
 #####################
 
-OPTS=`getopt -n $PROG -o v,V,h,s:,g,p,i -l verbose,version,help,sdp:,get,patch,inplace -- "$@"` || ( ret=$?; show_usage; exit $ret ) >&2
+OPTS=`getopt -n $PROG -o v,V,h,s:,g,p,i,e -l verbose,version,help,sdp:,get,patch,inplace,escape -- "$@"` || ( ret=$?; show_usage; exit $ret ) >&2
 eval set -- "$OPTS"
 
-verbose=; get_mode=; patch_mode=; inplace=; sdp=
+verbose=; get_mode=; patch_mode=-p; inplace=; sdp=; escape=
 while :; do
     case "$1" in
     -v|--verbose) verbose=-v;;
     -V|--version) print_version; exit 0;;
     -h|--help) show_help;;
-    -s|--sdp) sdp=="$2"; shift;;
-    -g|--get) get_mode=-g;;
-    -p|--patch) patch_mode=-r;;
+    -s|--sdp) sdp="$2"; shift;;
+    -g|--get)
+            get_mode=-g
+            patch_mode=
+            ;;
+    -e|--escape) escape=-e;;
+    -p|--patch)
+            patch_mode=-p
+            get_mode=
+            ;;
     -i|--inplace) inplace=-i;;
     --) shift; break;;
     *)
@@ -118,6 +128,10 @@ getpps()
 
 writespps()
 {
+    local sdp="$1"
+
+    info 'Read SDP data from %s\n' "${sdp:-<stdin>}"
+
     local spps="$(getspps "$sdp")"
     [ -n "$spps" ] || fatal 'SPS/PPS data not found!\n'
 
@@ -125,42 +139,84 @@ writespps()
 
     local sps="$(echo "$spps" | getsps)"
     if [ -n "$sps" ]; then
-        echo "$sps" | base64 -d >"$workdir/sps" || ret=$?
+        echo "$sps" | base64 -d >"$workdir/sps" 2>/dev/null || ret=$?
         [ $ret -eq 0 ] || fatal 'Invalid SPS data: %s\n' "$sps"
+
+        local first="$(hexdump -n 1 -e '/1 "%02X"' "$workdir/sps")"
+        if [ "$first" = '68' ]; then
+            mv "$workdir/sps" "$workdir/pps"
+        fi
     fi
 
     local pps="$(echo "$spps" | getpps)"
     if [ -n "$pps" ]; then
-        echo "$pps" | base64 -d >"$workdir/pps" || ret=$?
+        echo "$pps" | base64 -d >"$workdir/pps" 2>/dev/null || ret=$?
         [ $ret -eq 0 ] || fatal 'Invalid PPS data: %s\n' "$pps"
+
+        local first="$(hexdump -n 1 -e '/1 "%02X"' "$workdir/pps")"
+        if [ "$first" = '67' ]; then
+            mv "$workdir/pps" "$workdir/sps"
+        fi
     fi
 }
 
 printinhex()
 {
-    local nalu="$1"
+    local startcode="$1"
     local file="${2:-}"
+    local zcnt=0
 
     if [ -z "$file" ]; then
-        file="$nalu"
-        nalu=
+        file="$startcode"
+        startcode=
     fi
 
     [ -s "$file" ] || return 0
     
-    if [ -z "$nalu" ]; then
+    if [ -z "$startcode" ]; then
         cat "$file" | hexdump -v -e '/1 "%02X "'
+    elif [ -z "$escape" ]; then
+        printf '%s' "$startcode"
+        cat "$file" | hexdump -v -e '/1 " %02X"'
     else
-        printf '%s' "$nalu"
+        printf '%s' "$startcode"
         cat "$file" | hexdump -v -e '/1 "%02X\n"' | \
             while read byte; do
                 case "$byte" in
                     00|01|02)
-                        
+                        if [ $zcnt -eq 2 ]; then
+                            printf ' 03'
+                            zcnt=0
+                        elif [ "$byte" = '00' ]; then
+                            zcnt=$((zcnt + 1))
+                        fi
+                        printf ' %s' "$byte"
+                        ;;
+                    *)
+                        printf ' %s' "$byte"
+                        zcnt=0
+                    ;;
+                esac
             done
-        printf '\n'
     fi
 }
+
+printspsinhex()
+{
+    local startcode="${1:-}"
+
+    [ ! -e "$workdir/sps" ] || \
+        printinhex ${startcode:+"$startcode"} "$workdir/sps"
+}
+
+printppsinhex()
+{
+    local startcode="${1:-}"
+
+    [ ! -e "$workdir/pps" ] || \
+        printinhex ${startcode:+"$startcode"} "$workdir/pps"
+}
+
 
 ## Main
 
@@ -176,30 +232,28 @@ trap "cleanup" EXIT
 if [ -n "$get_mode" ]; then
     # Get mode
     [ -n "$sdp" ] || sdp="${1:-}"
-
-    info 'Read SDP data from %s\n' "${sdp:-<stdin>}"
-
-    spps="$(getspps "$sdp")"
-    [ -n "$spps" ] || fatal 'SPS/PPS data not found!\n'
-
-    sps="$(echo "$spps" | getsps)"
-    [ -z "$sps" ] || \
-        printf 'SPS: %s\n' "$(echo "$sps" | base64 -d | printinhex)"
-
-    pps="$(echo "$spps" | getpps)"
-    [ -z "$pps" ] || \
-        printf 'PPS: %s\n' "$(echo "$pps" | base64 -d | printinhex)"
+    writespps "$sdp"
+    [ ! -e "$workdir/sps" ] || printf 'SPS: %s\n' "$(printspsinhex)"
+    [ ! -e "$workdir/pps" ] || printf 'PPS: %s\n' "$(printppsinhex)"
 else
     # Patch mode
     infile="${1:-}"
     [ -n "$sdp" ] || fatal 'SDP file is not specified\n'
-
-    info 'Read SDP data from %s\n' "$sdp"
-    info 'Read h264 stream from %s\n' "${infile:-<stdin>}"
-    [ -z "$inplace" ] || info 'Patch the stream inplace\n'
-
-    spps="$(getspps "$sdp")"
-    [ -n "$spps" ] || fatal 'SPS/PPS data not found!\n'
-
     
+    writespps "$sdp"
+
+    [ -e "$workdir/sps" ] || fatal 'SPS data not found\n'
+    info 'SPS: %s\n' "$(printspsinhex)"
+
+    [ -e "$workdir/pps" ] || fatal 'PPS data not found\n'
+    info 'PPS: %s\n' "$(printppsinhex)"
+
+    info 'Read h264 stream from %s\n' "${infile:-<stdin>}"
+    [ -z "$inplace" ] || info 'Patching the stream inplace\n'
+
+    info 'Escaping is %s\n' \
+        "$(if [ -n "$escape" ]; then echo 'on'; else echo 'off'; fi)"
+
+    printspsinhex '00 00 00 01'; echo
+    printppsinhex '00 00 00 01'; echo
 fi
