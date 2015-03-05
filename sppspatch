@@ -230,7 +230,7 @@ makenalu()
     local file="$2"
 
     prefix='00 00 00 01'
-    checkfirstbyte "$file" "$first" || prefix="$spsprefix $first"
+    checkfirstbyte "$file" "$first" || prefix="$prefix $first"
     printinhex "$prefix" "$file"
 }
 
