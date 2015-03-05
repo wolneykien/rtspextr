@@ -126,6 +126,7 @@ getpps()
     sed -e 's/^.*,//'
 }
 
+# TODO: use bit mask
 checkfirstbyte()
 {
     local file="$1"
@@ -157,9 +158,9 @@ writespps()
         echo "$sps" | base64 -d >"$workdir/sps" 2>/dev/null || ret=$?
         [ $ret -eq 0 ] || fatal 'Invalid SPS data: %s\n' "$sps"
         
-        if checkfirstbyte "$workdir/sps" 68; then
-            mv "$workdir/sps" "$workdir/pps"
-        fi
+        #if checkfirstbyte "$workdir/sps" 68; then
+        #    mv "$workdir/sps" "$workdir/pps"
+        #fi
     fi
 
     local pps="$(echo "$spps" | getpps)"
@@ -167,9 +168,9 @@ writespps()
         echo "$pps" | base64 -d >"$workdir/pps" 2>/dev/null || ret=$?
         [ $ret -eq 0 ] || fatal 'Invalid PPS data: %s\n' "$pps"
 
-        if checkfirstbyte "$workdir/pps" 67; then
-            mv "$workdir/pps" "$workdir/sps"
-        fi
+        #if checkfirstbyte "$workdir/pps" 67; then
+        #    mv "$workdir/pps" "$workdir/sps"
+        #fi
     fi
 }
 
@@ -226,11 +227,9 @@ hexbytes()
 
 makenalu()
 {
-    local first="$1"
-    local file="$2"
+    local file="$1"
+    local prefix='00 00 00 01'
 
-    prefix='00 00 00 01'
-    checkfirstbyte "$file" "$first" || prefix="$prefix $first"
     printinhex "$prefix" "$file"
 }
 
@@ -272,10 +271,10 @@ else
     info 'Escaping is %s\n' \
         "$(if [ -n "$escape" ]; then echo 'on'; else echo 'off'; fi)"
 
-    makenalu 67 "$workdir/sps" >"$workdir/spsnalu"
+    makenalu "$workdir/sps" >"$workdir/spsnalu"
     info 'SPS NALU: %s\n' "$(cat "$workdir/spsnalu")"
 
-    makenalu 68 "$workdir/pps" >"$workdir/ppsnalu"
+    makenalu "$workdir/pps" >"$workdir/ppsnalu"
     info 'PPS NALU: %s\n' "$(cat "$workdir/ppsnalu")"
     
     if [ -z "$inplace" -o -z "$infile" ]; then
