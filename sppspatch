@@ -10,6 +10,7 @@
 PROG="${0##*/}"
 PROG_VERSION=0.1.0
 
+[ -z "${DEBUG:-}" ] || set -x
 
 show_help() {
     cat <<EOF
@@ -112,7 +113,7 @@ getspps()
 {
     local sdp="${1:-}"
 
-    sed -n -e 's/^\(.\+[,;[:space:]]\+\)\?sprop-parameter-sets=\(.*\);\?$/\2/p' \
+    sed -n -e 's/^\(.\+[,;[:space:]]\+\)\?sprop-parameter-sets=\([^[:space:]]*\)[[:space:]]*;\?$/\2/p' \
         ${sdp:+"$sdp"}
 }
 
