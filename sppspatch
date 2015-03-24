@@ -237,7 +237,7 @@ makenalu()
 
 ## Main
 
-workdir="$(mktemp -d "$PROG.XXXXXXXXXX")"
+workdir="$(mktemp --tmpdir -d "$PROG.XXXXXXXXXX")"
 
 cleanup()
 {
