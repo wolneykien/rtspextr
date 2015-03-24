@@ -64,7 +64,7 @@
 #include <pcap/pcap.h>
 #include <pcap/bpf.h>
 
-#define PKTBUFSIZE 4096 /* */
+#define PKTBUFSIZE 65536 /* */
 
 #endif
 

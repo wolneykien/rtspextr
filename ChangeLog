@@ -1,3 +1,9 @@
+2015-03-24  Paul Wolneykien  <p.wolneykien@metrotek.spb.ru>
+
+	* Version 0.1.4.
+	* rtspextr: Use larger dump buffer (64K).
+        * sppspatch: Fixed some bugs.
+
 2015-02-19  Paul Wolneykien  <p.wolneykien@metrotek.spb.ru>
 
 	* Version 0.1.3.
